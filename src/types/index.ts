@@ -15,7 +15,7 @@ export interface SubtitleSegment {
   emoji?: string;
 }
 
-export type KineticStyle = 'hormozi' | 'mrbeast' | 'tiktok-glow' | 'minimal-clean';
+export type KineticStyle = 'hormozi' | 'mrbeast' | 'tiktok-glow' | 'minimal-clean' | 'ali-abdaal' | 'karaoke-wave';
 
 export interface KineticConfig {
   style: KineticStyle;
@@ -30,6 +30,10 @@ export interface KineticConfig {
   positionY: number;          // porcentagem da altura vertical (ex: 75% da tela)
   animationScale: number;     // escala de zoom na palavra ativa (ex: 1.2x)
   glowColor?: string;         // cor de neon (para tiktok-glow)
+  highlighter?: boolean;      // efeito marca-texto/caneta atrás da palavra ativa
+  highlighterColor?: string; // cor do marca-texto (ex: #facc15 ou #4ade80)
+  rotation?: number;          // rotação sutil em graus (ex: -2 para estilo Ali Abdaal)
+  karaokeProgressive?: boolean; // efeito karaokê de preenchimento suave
 }
 
 export interface VideoDimensions {

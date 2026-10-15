@@ -2,7 +2,8 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { 
   Sparkles, Play, Pause, RotateCcw, Volume2, VolumeX,
   Upload, Download, FileText, Film, Sliders, Type,
-  Smile, Plus, Trash2, Check, ArrowRight, Wand2, Cpu
+  Smile, Plus, Trash2, Check, ArrowRight, Wand2, Cpu,
+  Mic, Layers, Zap
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { 
@@ -13,9 +14,18 @@ import {
 import { KINETIC_PRESETS } from './core/kinetic-styles';
 import { autoAssignEmojis, detectContextEmoji } from './core/emoji-detector';
 import { renderKineticSubtitleOnCanvas } from './core/canvas-renderer';
-import { exportToSRT, exportToVTT, exportToGardenCut, exportVideoWithBurnIn } from './core/exporters';
+import { 
+  exportToSRT, 
+  exportToVTT, 
+  exportToGardenCut, 
+  exportVideoWithBurnIn,
+  exportToASS,
+  exportTransparentOverlay
+} from './core/exporters';
 import { DEMO_SUBTITLE_SEGMENTS, generateSegmentsFromText } from './core/demo-data';
 import { isNonNativeFormat, transcodeOrRemuxVideo, convertWebMToMP4 } from './core/ffmpeg-transcoder';
+import { parseSubtitleFile, createWordTimestamps } from './core/subtitle-parsers';
+import { isSpeechRecognitionSupported, transcribeMediaElement } from './core/speech-transcriber';
 
 export function App() {
   // Estado do Vídeo
@@ -47,6 +57,7 @@ export function App() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const previewCanvasRef = useRef<HTMLCanvasElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const subFileInputRef = useRef<HTMLInputElement>(null);
   const animFrameRef = useRef<number | null>(null);
 
   const showToast = (msg: string) => {
@@ -59,6 +70,12 @@ export function App() {
   const [transcodeProgress, setTranscodeProgress] = useState<number>(0);
   const [transcodeStatus, setTranscodeStatus] = useState<string>('');
   const [lastUploadedFile, setLastUploadedFile] = useState<File | null>(null);
+
+  // Estados Adicionais: Drag & Drop, Transcrição IA, Emojis
+  const [isDragging, setIsDragging] = useState<boolean>(false);
+  const [isTranscribingAudio, setIsTranscribingAudio] = useState<boolean>(false);
+  const [liveTranscriptionText, setLiveTranscriptionText] = useState<string>('');
+  const [editingEmojiSegmentId, setEditingEmojiSegmentId] = useState<string | null>(null);
 
   // Executa transcode ou remuxing de um arquivo usando FFmpeg Wasm
   const processTranscode = async (file: File) => {
@@ -90,10 +107,39 @@ export function App() {
     }
   };
 
-  // Carregar vídeo via upload (com detecção inteligente de formato)
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Importar arquivo de legenda (.srt, .vtt, .garden-sub)
+  const loadSubtitleFromFile = async (file: File) => {
+    try {
+      const text = await file.text();
+      const parsed = parseSubtitleFile(file.name, text);
+      if (parsed.length > 0) {
+        setSegments(parsed);
+        confetti({ particleCount: 70, spread: 60, origin: { y: 0.6 } });
+        showToast(`🎉 ${parsed.length} blocos de legenda importados de "${file.name}"!`);
+        setActiveTab('editor');
+      } else {
+        alert('Nenhuma legenda válida encontrada no arquivo.');
+      }
+    } catch (err: any) {
+      console.error(err);
+      alert('Erro ao ler arquivo de legenda: ' + err.message);
+    }
+  };
+
+  const handleSubFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    await loadSubtitleFromFile(file);
+    if (e.target) e.target.value = '';
+  };
+
+  // Carregar arquivo de mídia a partir de um File object (usado tanto por upload quanto por drag & drop)
+  const loadMediaFile = async (file: File) => {
+    const ext = file.name.toLowerCase().split('.').pop() || '';
+    if (['srt', 'vtt', 'garden-sub', 'json'].includes(ext)) {
+      await loadSubtitleFromFile(file);
+      return;
+    }
 
     setLastUploadedFile(file);
 
@@ -109,6 +155,105 @@ export function App() {
     setCurrentTime(0);
     setIsPlaying(false);
     showToast(`Mídia "${file.name}" carregada com sucesso!`);
+  };
+
+  // Upload convencional via botão
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    await loadMediaFile(file);
+    if (e.target) e.target.value = '';
+  };
+
+  // Drag & Drop
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+  };
+
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) {
+      await loadMediaFile(file);
+    }
+  };
+
+  // Transcrever áudio por IA nativa no navegador
+  const handleTranscribeWithAI = async () => {
+    if (!videoRef.current || !videoSrc) {
+      alert('Carregue um vídeo ou áudio primeiro para transcrever.');
+      return;
+    }
+
+    if (!isSpeechRecognitionSupported()) {
+      alert('O reconhecimento de fala nativo não está disponível neste navegador. Use o Google Chrome ou Edge.');
+      return;
+    }
+
+    try {
+      setIsTranscribingAudio(true);
+      setLiveTranscriptionText('Iniciando escuta e alinhamento...');
+      showToast('🎙️ Ouvindo áudio e gerando legendas cinéticas...');
+
+      const generated = await transcribeMediaElement(videoRef.current, (text) => {
+        setLiveTranscriptionText(text);
+      });
+
+      if (generated.length > 0) {
+        setSegments(generated);
+        confetti({ particleCount: 80, spread: 70, origin: { y: 0.6 } });
+        showToast(`🎉 IA transcreveu ${generated.length} segmentos com sucesso!`);
+        setActiveTab('editor');
+      } else {
+        showToast('Nenhuma fala detectada no áudio.');
+      }
+    } catch (err: any) {
+      console.error(err);
+      alert('Erro ao transcrever áudio: ' + (err.message || err));
+    } finally {
+      setIsTranscribingAudio(false);
+      setLiveTranscriptionText('');
+    }
+  };
+
+  // Selecionar emoji manualmente para um segmento
+  const handleSelectEmoji = (segmentId: string, emoji: string | null) => {
+    setSegments(prev => prev.map(s => {
+      if (s.id === segmentId) {
+        return { ...s, emoji: emoji || undefined };
+      }
+      return s;
+    }));
+    setEditingEmojiSegmentId(null);
+    showToast(emoji ? `Emoji ${emoji} atualizado!` : 'Emoji removido.');
+  };
+
+  // Atualizar texto do segmento em tempo real
+  const handleUpdateSegmentText = (segmentId: string, newText: string) => {
+    setSegments(prev => prev.map(s => {
+      if (s.id === segmentId) {
+        const segStart = s.start;
+        const segEnd = s.end;
+        const words = createWordTimestamps(newText, segStart, segEnd, segmentId);
+        return {
+          ...s,
+          text: newText,
+          words,
+          emoji: s.emoji || detectContextEmoji(newText) || undefined
+        };
+      }
+      return s;
+    }));
   };
 
   // Carregar vídeo demo interativo procedural
@@ -306,6 +451,57 @@ export function App() {
     showToast('Arquivo .VTT baixado com sucesso!');
   };
 
+  // MODO 1C: Exportar Legenda em Fundo Transparente (Alpha WebM Overlay)
+  const handleExportTransparentOverlay = async () => {
+    try {
+      setIsExporting(true);
+      setExportProgress(0);
+      setIsPlaying(false);
+      showToast('Renderizando overlay transparente (Alpha WebM)...');
+
+      const w = aspectRatio === '9:16' ? 720 : 1280;
+      const h = aspectRatio === '9:16' ? 1280 : 720;
+
+      const blob = await exportTransparentOverlay(
+        segments,
+        kineticConfig,
+        duration,
+        w,
+        h,
+        (pct) => setExportProgress(pct)
+      );
+
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `garden_subtitle_${videoName.replace(/\.[^/.]+$/, '')}_overlay_transparente.webm`;
+      a.click();
+
+      confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
+      showToast('🎉 Overlay transparente exportado com sucesso!');
+    } catch (err: any) {
+      console.error(err);
+      alert('Erro ao exportar overlay transparente: ' + err.message);
+    } finally {
+      setIsExporting(false);
+      setExportProgress(0);
+    }
+  };
+
+  // MODO 2D: Exportar ASS (Advanced SubStation Alpha)
+  const handleExportASS = () => {
+    const w = aspectRatio === '9:16' ? 1080 : 1920;
+    const h = aspectRatio === '9:16' ? 1920 : 1080;
+    const assContent = exportToASS(segments, kineticConfig, w, h);
+    const blob = new Blob([assContent], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${videoName.replace(/\.[^/.]+$/, '')}.ass`;
+    a.click();
+    showToast('Arquivo de legendas avançadas .ASS baixado com sucesso!');
+  };
+
   // Formatação de Tempo (00:00.0)
   const formatTime = (secs: number) => {
     const m = Math.floor(secs / 60);
@@ -315,7 +511,25 @@ export function App() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-emerald-500 selection:text-slate-950">
+    <div 
+      className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-emerald-500 selection:text-slate-950 relative"
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
+      {/* Overlay Visual de Drag & Drop */}
+      {isDragging && (
+        <div className="fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-md flex flex-col items-center justify-center p-6 border-4 border-dashed border-emerald-500 pointer-events-none">
+          <div className="w-20 h-20 rounded-3xl bg-emerald-500/10 border border-emerald-500/40 flex items-center justify-center text-emerald-400 mb-4 animate-bounce">
+            <Upload className="w-10 h-10" />
+          </div>
+          <h2 className="text-xl font-black text-white">Solte o arquivo para carregar</h2>
+          <p className="text-sm text-slate-400 mt-1 text-center max-w-md">
+            Vídeos (.mp4, .webm, .mov, .mkv, .avi), Áudios (.mp3, .wav, .m4a) ou Legendas (.srt, .vtt, .garden-sub)
+          </p>
+        </div>
+      )}
+
       {/* Toast Notificação */}
       {statusMessage && (
         <div className="fixed top-5 left-1/2 -translate-x-1/2 z-50 bg-slate-900 border border-emerald-500/50 text-emerald-300 px-5 py-2.5 rounded-2xl shadow-2xl text-xs font-semibold flex items-center gap-2 animate-bounce">
@@ -335,7 +549,7 @@ export function App() {
               <h1 className="text-base font-extrabold tracking-tight text-white flex items-center gap-2">
                 Garden Subtitle
                 <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-bold">
-                  v0.1.0 &middot; 100% Web
+                  v0.2.0 &middot; 100% Web
                 </span>
               </h1>
               <p className="text-[11px] text-slate-400">Estúdio Web de Legendas Cinéticas & Word-by-Word</p>
@@ -344,17 +558,33 @@ export function App() {
 
           <div className="flex items-center gap-2">
             <button
+              onClick={() => subFileInputRef.current?.click()}
+              className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 hover:border-cyan-500/40 text-xs font-semibold text-slate-200 transition cursor-pointer"
+              title="Importar arquivo .SRT, .VTT ou .GARDEN-SUB"
+            >
+              <FileText className="w-3.5 h-3.5 text-cyan-400" />
+              <span>Importar Legenda</span>
+            </button>
+            <input
+              type="file"
+              ref={subFileInputRef}
+              onChange={handleSubFileUpload}
+              accept=".srt,.vtt,.garden-sub,.json"
+              className="hidden"
+            />
+
+            <button
               onClick={() => fileInputRef.current?.click()}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 hover:border-slate-700 text-xs font-semibold text-slate-200 transition cursor-pointer"
             >
               <Upload className="w-3.5 h-3.5 text-emerald-400" />
-              <span>Subir Vídeo</span>
+              <span>Subir Mídia</span>
             </button>
             <input
               type="file"
               ref={fileInputRef}
               onChange={handleFileUpload}
-              accept="video/*,audio/*,.mp4,.webm,.mov,.m4v,.ogg,.ogv,.mkv,.avi,.mp3,.wav,.m4a,.aac"
+              accept="video/*,audio/*,.mp4,.webm,.mov,.m4v,.ogg,.ogv,.mkv,.avi,.flv,.wmv,.mts,.mp3,.wav,.m4a,.aac"
               className="hidden"
             />
 
@@ -505,6 +735,39 @@ export function App() {
                 </div>
               </div>
             </div>
+
+            {/* Barra de Ação de Transcrição por IA */}
+            <div className="w-full mt-3 p-3 rounded-2xl bg-gradient-to-r from-emerald-950/40 via-slate-900 to-cyan-950/30 border border-emerald-500/30 flex items-center justify-between gap-3 shadow-md">
+              <div className="flex items-center gap-2.5">
+                <div className={`p-2 rounded-xl ${isTranscribingAudio ? 'bg-red-500/20 text-red-400 animate-pulse' : 'bg-emerald-500/10 text-emerald-400'}`}>
+                  <Mic className="w-4 h-4" />
+                </div>
+                <div>
+                  <h4 className="text-xs font-bold text-white flex items-center gap-1.5">
+                    Transcrição com IA Local
+                    <span className="text-[9px] px-1.5 py-0.2 bg-emerald-500/10 text-emerald-400 rounded-full border border-emerald-500/20 font-mono">pt-BR</span>
+                  </h4>
+                  <p className="text-[10px] text-slate-400">
+                    {isTranscribingAudio 
+                      ? (liveTranscriptionText ? `Ouvindo: "${liveTranscriptionText}"` : 'Escutando fala do vídeo em tempo real...')
+                      : 'Gera as palavras e timestamps automaticamente a partir da fala'}
+                  </p>
+                </div>
+              </div>
+
+              <button
+                onClick={handleTranscribeWithAI}
+                disabled={isTranscribingAudio}
+                className={`px-3 py-1.5 rounded-xl font-bold text-xs flex items-center gap-1.5 transition cursor-pointer shadow-md ${
+                  isTranscribingAudio 
+                    ? 'bg-red-500/20 text-red-300 border border-red-500/40 animate-pulse' 
+                    : 'bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-emerald-500/20 active:scale-95'
+                }`}
+              >
+                <Zap className="w-3.5 h-3.5" />
+                <span>{isTranscribingAudio ? 'Transcrevendo...' : 'Transcrever Áudio'}</span>
+              </button>
+            </div>
           </div>
         </section>
 
@@ -597,9 +860,37 @@ export function App() {
                           <span className="font-mono text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-lg">
                             {formatTime(seg.start)} ➔ {formatTime(seg.end)}
                           </span>
-                          {seg.emoji && (
-                            <span className="text-base" title="Emoji contextual ativo">{seg.emoji}</span>
-                          )}
+
+                          {/* Seletor Manual de Emoji */}
+                          <div className="relative">
+                            <button
+                              onClick={() => setEditingEmojiSegmentId(prev => prev === seg.id ? null : seg.id)}
+                              className="text-sm px-2 py-0.5 rounded-lg bg-slate-900 border border-slate-800 hover:border-amber-400/50 transition cursor-pointer flex items-center gap-1"
+                              title="Clique para escolher ou trocar o emoji deste bloco"
+                            >
+                              <span>{seg.emoji || '➕'}</span>
+                            </button>
+
+                            {editingEmojiSegmentId === seg.id && (
+                              <div className="absolute left-0 top-8 z-40 bg-slate-900 border border-slate-700 rounded-2xl p-2 shadow-2xl flex flex-wrap gap-1.5 w-60">
+                                {['🔥', '💰', '💡', '🚀', '🎯', '⚡', '🤯', '👏', '📈', '💎', '❤️', '👑', '🎬', '✨', '🏆', '👀'].map(em => (
+                                  <button
+                                    key={em}
+                                    onClick={() => handleSelectEmoji(seg.id, em)}
+                                    className="w-8 h-8 rounded-xl bg-slate-950 hover:bg-emerald-500/20 hover:scale-110 transition text-base flex items-center justify-center cursor-pointer"
+                                  >
+                                    {em}
+                                  </button>
+                                ))}
+                                <button
+                                  onClick={() => handleSelectEmoji(seg.id, null)}
+                                  className="w-full mt-1 py-1 rounded-lg bg-slate-950 hover:bg-rose-500/20 text-rose-400 text-[10px] font-bold transition cursor-pointer"
+                                >
+                                  Remover Emoji ✕
+                                </button>
+                              </div>
+                            )}
+                          </div>
                         </div>
 
                         <div className="flex items-center gap-1">
@@ -622,6 +913,15 @@ export function App() {
                           </button>
                         </div>
                       </div>
+
+                      {/* Texto editável do bloco */}
+                      <input
+                        type="text"
+                        value={seg.text}
+                        onChange={(e) => handleUpdateSegmentText(seg.id, e.target.value)}
+                        className="w-full bg-slate-900/80 border border-slate-800 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-emerald-500 font-medium"
+                        placeholder="Texto da fala..."
+                      />
 
                       {/* Palavras individuais do segmento */}
                       <div className="flex flex-wrap gap-1.5 pt-1">
@@ -704,12 +1004,12 @@ export function App() {
                 <p className="text-[10px] text-slate-400">Escolha uma estética viral pronta ou customize os parâmetros</p>
               </div>
 
-              {/* Grid dos 4 Presets Visuais */}
-              <div className="grid grid-cols-2 gap-3">
+              {/* Grid dos 6 Presets Visuais */}
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                 {/* Hormozi */}
                 <div
                   onClick={() => handleSelectPreset('hormozi')}
-                  className={`p-3.5 rounded-2xl border cursor-pointer transition flex flex-col justify-between ${
+                  className={`p-3 rounded-2xl border cursor-pointer transition flex flex-col justify-between ${
                     kineticConfig.style === 'hormozi'
                       ? 'bg-amber-500/10 border-amber-400 text-white shadow-lg'
                       : 'bg-slate-950 border-slate-800 hover:border-slate-700 text-slate-300'
@@ -729,7 +1029,7 @@ export function App() {
                 {/* MrBeast */}
                 <div
                   onClick={() => handleSelectPreset('mrbeast')}
-                  className={`p-3.5 rounded-2xl border cursor-pointer transition flex flex-col justify-between ${
+                  className={`p-3 rounded-2xl border cursor-pointer transition flex flex-col justify-between ${
                     kineticConfig.style === 'mrbeast'
                       ? 'bg-emerald-500/10 border-emerald-400 text-white shadow-lg'
                       : 'bg-slate-950 border-slate-800 hover:border-slate-700 text-slate-300'
@@ -748,7 +1048,7 @@ export function App() {
                 {/* TikTok Glow */}
                 <div
                   onClick={() => handleSelectPreset('tiktok-glow')}
-                  className={`p-3.5 rounded-2xl border cursor-pointer transition flex flex-col justify-between ${
+                  className={`p-3 rounded-2xl border cursor-pointer transition flex flex-col justify-between ${
                     kineticConfig.style === 'tiktok-glow'
                       ? 'bg-cyan-500/10 border-cyan-400 text-white shadow-lg'
                       : 'bg-slate-950 border-slate-800 hover:border-slate-700 text-slate-300'
@@ -764,10 +1064,50 @@ export function App() {
                   <span className="text-[9px] text-slate-400">Brilho neon e quebras curtas</span>
                 </div>
 
+                {/* Ali Abdaal */}
+                <div
+                  onClick={() => handleSelectPreset('ali-abdaal')}
+                  className={`p-3 rounded-2xl border cursor-pointer transition flex flex-col justify-between ${
+                    kineticConfig.style === 'ali-abdaal'
+                      ? 'bg-amber-400/10 border-amber-300 text-white shadow-lg'
+                      : 'bg-slate-950 border-slate-800 hover:border-slate-700 text-slate-300'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-black uppercase">Ali Abdaal</span>
+                    {kineticConfig.style === 'ali-abdaal' && <Check className="w-4 h-4 text-amber-300" />}
+                  </div>
+                  <div className="my-2 p-1 rounded-lg text-center font-bold text-xs">
+                    <span className="bg-amber-400 text-slate-950 px-2 py-0.5 rounded font-black -rotate-2 inline-block">
+                      MARCA-TEXTO
+                    </span>
+                  </div>
+                  <span className="text-[9px] text-slate-400">Caneta fluorescente & rotação -2°</span>
+                </div>
+
+                {/* Karaoke Wave */}
+                <div
+                  onClick={() => handleSelectPreset('karaoke-wave')}
+                  className={`p-3 rounded-2xl border cursor-pointer transition flex flex-col justify-between ${
+                    kineticConfig.style === 'karaoke-wave'
+                      ? 'bg-pink-500/10 border-pink-400 text-white shadow-lg'
+                      : 'bg-slate-950 border-slate-800 hover:border-slate-700 text-slate-300'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-black uppercase">Karaoke Wave</span>
+                    {kineticConfig.style === 'karaoke-wave' && <Check className="w-4 h-4 text-pink-400" />}
+                  </div>
+                  <div className="my-2 p-1.5 rounded-lg text-center font-black text-xs">
+                    <span className="text-pink-400 drop-shadow-[0_0_8px_rgba(236,72,153,0.8)]">KARAOKÊ GLOW</span> 🌊
+                  </div>
+                  <span className="text-[9px] text-slate-400">Preenchimento suave na voz</span>
+                </div>
+
                 {/* Minimal Clean */}
                 <div
                   onClick={() => handleSelectPreset('minimal-clean')}
-                  className={`p-3.5 rounded-2xl border cursor-pointer transition flex flex-col justify-between ${
+                  className={`p-3 rounded-2xl border cursor-pointer transition flex flex-col justify-between ${
                     kineticConfig.style === 'minimal-clean'
                       ? 'bg-sky-500/10 border-sky-400 text-white shadow-lg'
                       : 'bg-slate-950 border-slate-800 hover:border-slate-700 text-slate-300'
@@ -850,6 +1190,39 @@ export function App() {
                   </div>
                 </div>
 
+                {/* Rotação e Marca-Texto */}
+                <div className="grid grid-cols-2 gap-3 pt-1">
+                  <div className="space-y-1">
+                    <div className="flex justify-between text-xs">
+                      <span className="text-slate-400">Rotação do Texto:</span>
+                      <span className="font-mono font-bold text-amber-400">{kineticConfig.rotation || 0}°</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="-8"
+                      max="8"
+                      value={kineticConfig.rotation || 0}
+                      onChange={(e) => setKineticConfig({ ...kineticConfig, rotation: parseInt(e.target.value) })}
+                      className="w-full h-1.5 bg-slate-950 rounded-lg appearance-none cursor-pointer accent-amber-500"
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between p-2 rounded-xl bg-slate-950 border border-slate-800">
+                    <div>
+                      <span className="text-xs font-bold text-white block">Marca-Texto</span>
+                      <span className="text-[9px] text-slate-400">Caneta fluorescente</span>
+                    </div>
+                    <button
+                      onClick={() => setKineticConfig(prev => ({ ...prev, highlighter: !prev.highlighter }))}
+                      className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition cursor-pointer ${
+                        kineticConfig.highlighter ? 'bg-amber-400 text-slate-950' : 'bg-slate-800 text-slate-400'
+                      }`}
+                    >
+                      {kineticConfig.highlighter ? 'Ativado' : 'Desativado'}
+                    </button>
+                  </div>
+                </div>
+
                 {/* Toggle de Emojis */}
                 <div className="flex items-center justify-between p-3 rounded-2xl bg-slate-950 border border-slate-800">
                   <div>
@@ -870,7 +1243,7 @@ export function App() {
           )}
 
           {/* =========================================================================
-              ABA 3: EXPORTAÇÃO (MODO 1: VÍDEO FINAL COM LEGENDA & MODO 2: GARDENCUT / SRT)
+              ABA 3: EXPORTAÇÃO (MODO 1: VÍDEO FINAL COM LEGENDA & MODO 2: GARDENCUT / SRT / ASS)
           ========================================================================= */}
           {activeTab === 'export' && (
             <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 shadow-xl space-y-5">
@@ -926,6 +1299,13 @@ export function App() {
                       <Cpu className="w-3.5 h-3.5" />
                       <span>Converter para MP4 Universal (H.264 via FFmpeg Wasm)</span>
                     </button>
+                    <button
+                      onClick={handleExportTransparentOverlay}
+                      className="w-full py-2.5 rounded-xl bg-slate-950/80 border border-cyan-500/40 hover:bg-cyan-500/10 text-cyan-400 font-bold text-xs flex items-center justify-center gap-2 transition cursor-pointer active:scale-95"
+                    >
+                      <Layers className="w-3.5 h-3.5" />
+                      <span>Exportar Legenda em Fundo Transparente (Alpha WebM Overlay)</span>
+                    </button>
                   </div>
                 )}
               </div>
@@ -944,7 +1324,7 @@ export function App() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-2 pt-1">
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2 pt-1">
                   {/* Pacote GardenCut */}
                   <button
                     onClick={handleExportGardenCut}
@@ -952,7 +1332,7 @@ export function App() {
                   >
                     <div>
                       <span className="text-xs font-bold text-cyan-400 block mb-0.5">🌿 GardenCut</span>
-                      <p className="text-[10px] text-slate-400 leading-tight">Pacote .garden-sub para importar na timeline</p>
+                      <p className="text-[10px] text-slate-400 leading-tight">Pacote .garden-sub para timeline</p>
                     </div>
                     <span className="text-[9px] font-mono text-cyan-300 mt-2 flex items-center gap-1 font-bold">
                       Baixar .garden-sub <ArrowRight className="w-3 h-3" />
@@ -966,7 +1346,7 @@ export function App() {
                   >
                     <div>
                       <span className="text-xs font-bold text-white block mb-0.5">📄 Arquivo .SRT</span>
-                      <p className="text-[10px] text-slate-400 leading-tight">Padrão universal SubRip para qualquer editor</p>
+                      <p className="text-[10px] text-slate-400 leading-tight">Padrão universal SubRip</p>
                     </div>
                     <span className="text-[9px] font-mono text-slate-300 mt-2 flex items-center gap-1 font-bold">
                       Baixar .srt <ArrowRight className="w-3 h-3" />
@@ -980,10 +1360,24 @@ export function App() {
                   >
                     <div>
                       <span className="text-xs font-bold text-white block mb-0.5">🌐 Arquivo .VTT</span>
-                      <p className="text-[10px] text-slate-400 leading-tight">Legendas WebVTT para players de internet</p>
+                      <p className="text-[10px] text-slate-400 leading-tight">Legendas WebVTT para web</p>
                     </div>
                     <span className="text-[9px] font-mono text-slate-300 mt-2 flex items-center gap-1 font-bold">
                       Baixar .vtt <ArrowRight className="w-3 h-3" />
+                    </span>
+                  </button>
+
+                  {/* ASS */}
+                  <button
+                    onClick={handleExportASS}
+                    className="p-3 rounded-xl bg-slate-900 border border-slate-800 hover:border-amber-500/40 text-left transition cursor-pointer flex flex-col justify-between"
+                  >
+                    <div>
+                      <span className="text-xs font-bold text-amber-400 block mb-0.5">🎭 Arquivo .ASS</span>
+                      <p className="text-[10px] text-slate-400 leading-tight">SubStation Alpha com fontes e estilos</p>
+                    </div>
+                    <span className="text-[9px] font-mono text-amber-300 mt-2 flex items-center gap-1 font-bold">
+                      Baixar .ass <ArrowRight className="w-3 h-3" />
                     </span>
                   </button>
                 </div>

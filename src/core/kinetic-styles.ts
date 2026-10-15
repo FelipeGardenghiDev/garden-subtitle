@@ -50,5 +50,34 @@ export const KINETIC_PRESETS: Record<KineticStyle, KineticConfig> = {
     maxWordsPerLine: 5,
     positionY: 82,
     animationScale: 1.08
+  },
+  'ali-abdaal': {
+    style: 'ali-abdaal',
+    fontSize: 42,
+    highlightColor: '#090d16', // Letra escura sobre o marca-texto
+    textColor: '#ffffff',
+    strokeColor: '#000000',
+    strokeWidth: 0,
+    enableEmojis: true,
+    maxWordsPerLine: 4,
+    positionY: 76,
+    animationScale: 1.12,
+    highlighter: true,
+    highlighterColor: '#facc15', // Amarelo fluorescente marca-texto
+    rotation: -2
+  },
+  'karaoke-wave': {
+    style: 'karaoke-wave',
+    fontSize: 46,
+    highlightColor: '#ec4899', // Magenta elétrico
+    textColor: 'rgba(255, 255, 255, 0.5)',
+    strokeColor: '#000000',
+    strokeWidth: 4,
+    enableEmojis: true,
+    maxWordsPerLine: 4,
+    positionY: 74,
+    animationScale: 1.22,
+    glowColor: 'rgba(236, 72, 153, 0.75)',
+    karaokeProgressive: true
   }
 };

@@ -63,6 +63,7 @@ flowchart TD
 * **Nativos Diretos:** `.mp4`, `.webm`, `.mov` (QuickTime iPhone/Mac), `.m4v`, `.ogg`
 * **Áudios (Podcasts & Locuções):** `.mp3`, `.wav`, `.m4a`, `.aac`, `.flac`
 * **Formatos Estendidos via FFmpeg WebAssembly:** `.mkv` (OBS Studio), `.avi`, `.wmv`, `.flv`, `.mts`, `.ts` (com remuxing automático sem perda ou transcode local direto na máquina do usuário sem envio para a nuvem).
+* **Importação Direta de Legendas Existentes:** `.srt`, `.vtt` e `.garden-sub` (com divisão automática palavra por palavra e auto-emoji).
 
 ---
 
@@ -73,6 +74,7 @@ flowchart TD
 * **Vídeo Final com Legenda Fixa (*Burn-in*):** 
   * Exportação instantânea em `.webm` / `.mp4` nativo via Canvas Stream + MediaRecorder.
   * Exportação Universal MP4 (H.264) via motor FFmpeg WebAssembly integrado.
+* **Vídeo de Sobreposição Transparente (Alpha WebM Overlay):** Exportação apenas das legendas animadas sobre canal Alpha 100% transparente para sobrepor em editores profissionais (Premiere, DaVinci, Final Cut, CapCut).
 
 ---
 

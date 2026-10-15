@@ -10,13 +10,16 @@ export function renderKineticSubtitleOnCanvas(
   canvasHeight: number,
   currentTime: number,
   segments: SubtitleSegment[],
-  config: KineticConfig
+  config: KineticConfig,
+  transparentBackground = false
 ) {
   // 1. Limpar canvas
   ctx.clearRect(0, 0, canvasWidth, canvasHeight);
 
-  // 2. Desenhar o frame do vídeo se disponível e com dimensão válida
-  if (videoElement && videoElement.readyState >= 2 && videoElement.videoWidth > 0) {
+  // 2. Desenhar o frame do vídeo se disponível e não for modo transparente (Overlay Alpha)
+  if (transparentBackground) {
+    // Mantém canal Alpha 100% limpo para exportação de overlay
+  } else if (videoElement && videoElement.readyState >= 2 && videoElement.videoWidth > 0) {
     ctx.drawImage(videoElement, 0, 0, canvasWidth, canvasHeight);
   } else {
     // Fundo degradê escuro caso o vídeo não esteja carregado
@@ -53,6 +56,14 @@ export function renderKineticSubtitleOnCanvas(
     fontFamily = "'Plus Jakarta Sans', sans-serif";
     fontWeight = '700';
     isUpperCase = false;
+  } else if (config.style === 'ali-abdaal') {
+    fontFamily = "'Plus Jakarta Sans', 'Montserrat', sans-serif";
+    fontWeight = '800';
+    isUpperCase = true;
+  } else if (config.style === 'karaoke-wave') {
+    fontFamily = "'Montserrat', sans-serif";
+    fontWeight = '900';
+    isUpperCase = true;
   }
 
   // Ajuste de escala proporcional para resolução do canvas
@@ -78,6 +89,15 @@ export function renderKineticSubtitleOnCanvas(
   // Posição Y da linha na tela
   const baselineY = (canvasHeight * (config.positionY / 100));
 
+  // Aplicar rotação de design se configurada (ex: -2° no estilo Ali Abdaal)
+  ctx.save();
+  if (config.rotation) {
+    const centerLineX = canvasWidth / 2;
+    ctx.translate(centerLineX, baselineY);
+    ctx.rotate((config.rotation * Math.PI) / 180);
+    ctx.translate(-centerLineX, -baselineY);
+  }
+
   // 6. Desenhar Emoji no topo se habilitado
   if (config.enableEmojis && activeSegment.emoji) {
     const emojiFontSize = calculatedFontSize * 1.35;
@@ -87,7 +107,7 @@ export function renderKineticSubtitleOnCanvas(
     
     // Pequena animação de flutuação no emoji
     const bounceOffset = Math.sin(currentTime * 8) * 4;
-    ctx.fillText(activeSegment.emoji, canvasWidth / 2, baselineY - calculatedFontSize * 1.2 + bounceOffset);
+    ctx.fillText(activeSegment.emoji, canvasWidth / 2, baselineY - calculatedFontSize * 1.25 + bounceOffset);
     ctx.restore();
   }
 
@@ -109,7 +129,29 @@ export function renderKineticSubtitleOnCanvas(
       ctx.scale(zoomScale, zoomScale);
       ctx.translate(-wordCenterX, -baselineY);
 
-      // Fundo Hormozi (Pill / Caixa preta ou amarela)
+      // Efeito Marca-Texto (Highlighter Brush)
+      if (config.highlighter) {
+        const padX = calculatedFontSize * 0.28;
+        const padY = calculatedFontSize * 0.12;
+        const hColor = config.highlighterColor || '#facc15';
+        const markX = wordCenterX - (wordWidth / 2) - padX;
+        const markY = baselineY - (calculatedFontSize / 2) - padY;
+        const markW = wordWidth + (padX * 2);
+        const markH = calculatedFontSize + (padY * 2);
+
+        ctx.fillStyle = hColor;
+        ctx.beginPath();
+        ctx.roundRect(markX, markY, markW, markH, 6);
+        ctx.fill();
+
+        ctx.fillStyle = config.highlightColor || '#090d16';
+        ctx.fillText(rawText, wordCenterX, baselineY);
+        ctx.restore();
+        currentX += wordWidth + wordSpacings;
+        return;
+      }
+
+      // Fundo Hormozi (Pill / Caixa preta com borda amarela)
       if (config.style === 'hormozi') {
         const paddingX = calculatedFontSize * 0.25;
         const paddingY = calculatedFontSize * 0.15;
@@ -138,8 +180,8 @@ export function renderKineticSubtitleOnCanvas(
         return;
       }
 
-      // Estilo TikTok Glow (Sombra / Brilho Neon)
-      if (config.style === 'tiktok-glow' && config.glowColor) {
+      // Estilo TikTok Glow ou Karaoke Glow (Sombra / Brilho Neon)
+      if (config.glowColor) {
         ctx.shadowColor = config.glowColor;
         ctx.shadowBlur = 18;
       }
@@ -153,13 +195,33 @@ export function renderKineticSubtitleOnCanvas(
         ctx.strokeText(rawText, wordCenterX, baselineY);
       }
 
-      // Preenchimento com cor de destaque
-      ctx.fillStyle = config.highlightColor;
-      ctx.fillText(rawText, wordCenterX, baselineY);
+      // Efeito Karaokê Progressivo
+      if (config.karaokeProgressive) {
+        const wordDuration = Math.max(0.01, w.end - w.start);
+        const elapsed = Math.max(0, Math.min(1, (currentTime - w.start) / wordDuration));
+
+        // Primeiro desenha a palavra inativa
+        ctx.fillStyle = config.textColor || 'rgba(255, 255, 255, 0.5)';
+        ctx.fillText(rawText, wordCenterX, baselineY);
+
+        // Clip para preenchimento progressivo
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(currentX, baselineY - calculatedFontSize, wordWidth * elapsed, calculatedFontSize * 2);
+        ctx.clip();
+
+        ctx.fillStyle = config.highlightColor;
+        ctx.fillText(rawText, wordCenterX, baselineY);
+        ctx.restore();
+      } else {
+        // Preenchimento total com cor de destaque
+        ctx.fillStyle = config.highlightColor;
+        ctx.fillText(rawText, wordCenterX, baselineY);
+      }
 
     } else {
       // Palavra inativa
-      if (config.style === 'tiktok-glow') {
+      if (config.glowColor) {
         ctx.shadowBlur = 0;
       }
 
@@ -171,7 +233,7 @@ export function renderKineticSubtitleOnCanvas(
         ctx.strokeText(rawText, wordCenterX, baselineY);
       }
 
-      // Preenchimento branco padrão
+      // Preenchimento padrão
       ctx.fillStyle = config.textColor || '#ffffff';
       ctx.fillText(rawText, wordCenterX, baselineY);
     }
@@ -179,4 +241,6 @@ export function renderKineticSubtitleOnCanvas(
     ctx.restore();
     currentX += wordWidth + wordSpacings;
   });
+
+  ctx.restore(); // Fecha o contexto de rotação
 }

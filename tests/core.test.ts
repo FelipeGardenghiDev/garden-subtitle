@@ -1,9 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import { detectContextEmoji, autoAssignEmojis } from '../src/core/emoji-detector';
-import { exportToSRT, exportToVTT, exportToGardenCut } from '../src/core/exporters';
+import { exportToSRT, exportToVTT, exportToGardenCut, exportToASS } from '../src/core/exporters';
 import { KINETIC_PRESETS } from '../src/core/kinetic-styles';
 import { SubtitleSegment } from '../src/types';
 import { isNonNativeFormat } from '../src/core/ffmpeg-transcoder';
+import { parseSRT, parseVTT, parseSubtitleTime } from '../src/core/subtitle-parsers';
 
 describe('Garden Subtitle Core Engines', () => {
   const mockSegments: SubtitleSegment[] = [
@@ -79,5 +80,50 @@ describe('Garden Subtitle Core Engines', () => {
     expect(isNonNativeFormat('video_safari.mov')).toBe(false);
     expect(isNonNativeFormat('clip.webm')).toBe(false);
     expect(isNonNativeFormat('audio.mp3')).toBe(false);
+  });
+
+  it('parses SRT files into word-level segments correctly', () => {
+    const srtSample = `1
+00:00:01,000 --> 00:00:03,000
+Ganhar muito dinheiro online
+
+2
+00:00:03,500 --> 00:00:05,000
+Ideia genial de negócio`;
+
+    expect(parseSubtitleTime('00:01:23,500')).toBe(83.5);
+    const parsed = parseSRT(srtSample);
+    expect(parsed).toHaveLength(2);
+    expect(parsed[0].start).toBe(1);
+    expect(parsed[0].end).toBe(3);
+    expect(parsed[0].words).toHaveLength(4);
+    expect(parsed[0].words[0].word).toBe('Ganhar');
+    expect(parsed[0].emoji).toBe('💰');
+  });
+
+  it('parses WebVTT files correctly', () => {
+    const vttSample = `WEBVTT
+
+00:00:01.000 --> 00:00:02.500
+Pegando fogo no estúdio`;
+
+    const parsed = parseVTT(vttSample);
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0].words).toHaveLength(4);
+    expect(parsed[0].emoji).toBe('🔥');
+  });
+
+  it('exports valid Advanced SubStation Alpha (.ass) format', () => {
+    const ass = exportToASS(mockSegments, KINETIC_PRESETS['ali-abdaal']);
+    expect(ass).toContain('[Script Info]');
+    expect(ass).toContain('[V4+ Styles]');
+    expect(ass).toContain('Plus Jakarta Sans');
+    expect(ass).toContain('Dialogue: 0,0:00:01.00,0:00:02.50');
+  });
+
+  it('provides new kinetic presets Ali Abdaal and Karaoke Wave', () => {
+    expect(KINETIC_PRESETS['ali-abdaal'].highlighter).toBe(true);
+    expect(KINETIC_PRESETS['ali-abdaal'].rotation).toBe(-2);
+    expect(KINETIC_PRESETS['karaoke-wave'].karaokeProgressive).toBe(true);
   });
 });
