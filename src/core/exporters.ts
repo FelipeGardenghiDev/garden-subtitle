@@ -124,12 +124,17 @@ export function exportVideoWithBurnIn(
         console.warn('Áudio não capturável diretamente pelo captureStream, exportando faixa de vídeo:', err);
       }
 
-      // Identificar suporte de codec no navegador
+      // Identificar suporte de codec no navegador (prioriza MP4 nativo se suportado, senão WebM VP9/VP8)
       let mimeType = 'video/webm;codecs=vp9,opus';
-      if (!MediaRecorder.isTypeSupported(mimeType)) {
+      if (MediaRecorder.isTypeSupported('video/mp4;codecs=avc1')) {
+        mimeType = 'video/mp4;codecs=avc1';
+      } else if (MediaRecorder.isTypeSupported('video/mp4')) {
+        mimeType = 'video/mp4';
+      } else if (MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus')) {
+        mimeType = 'video/webm;codecs=vp9,opus';
+      } else if (MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus')) {
         mimeType = 'video/webm;codecs=vp8,opus';
-      }
-      if (!MediaRecorder.isTypeSupported(mimeType)) {
+      } else {
         mimeType = 'video/webm';
       }
 

@@ -201,7 +201,8 @@ export function App() {
       const url = URL.createObjectURL(finalBlob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `garden_subtitle_${videoName.replace(/\.[^/.]+$/, '')}_legendado.webm`;
+      const ext = finalBlob.type.includes('mp4') ? 'mp4' : 'webm';
+      a.download = `garden_subtitle_${videoName.replace(/\.[^/.]+$/, '')}_legendado.${ext}`;
       a.click();
 
       confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
@@ -299,7 +300,7 @@ export function App() {
               type="file"
               ref={fileInputRef}
               onChange={handleFileUpload}
-              accept="video/mp4,video/webm,video/quicktime"
+              accept="video/*,audio/*,.mp4,.webm,.mov,.m4v,.ogg,.ogv,.mkv,.avi,.mp3,.wav,.m4a,.aac"
               className="hidden"
             />
 
@@ -366,6 +367,9 @@ export function App() {
                   onLoadedMetadata={(e) => {
                     const v = e.currentTarget;
                     setDuration(v.duration || 10);
+                  }}
+                  onError={() => {
+                    showToast('⚠️ O navegador não conseguiu decodificar este codec nativamente. Recomendado: MP4, WebM, MOV ou MP3.');
                   }}
                   onEnded={() => setIsPlaying(false)}
                   className="hidden"

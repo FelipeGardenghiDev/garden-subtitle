@@ -15,8 +15,8 @@ export function renderKineticSubtitleOnCanvas(
   // 1. Limpar canvas
   ctx.clearRect(0, 0, canvasWidth, canvasHeight);
 
-  // 2. Desenhar o frame do vídeo se disponível
-  if (videoElement && videoElement.readyState >= 2) {
+  // 2. Desenhar o frame do vídeo se disponível e com dimensão válida
+  if (videoElement && videoElement.readyState >= 2 && videoElement.videoWidth > 0) {
     ctx.drawImage(videoElement, 0, 0, canvasWidth, canvasHeight);
   } else {
     // Fundo degradê escuro caso o vídeo não esteja carregado
