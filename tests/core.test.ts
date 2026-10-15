@@ -149,4 +149,40 @@ Pegando fogo no estúdio`;
     expect(jsx).toContain('myComp.layers.addText');
     expect(jsx).toContain('scaleProp.setValueAtTime');
   });
+
+  it('manages undo and redo stacks correctly with HistoryManager', async () => {
+    const { HistoryManager } = await import('../src/core/history-manager');
+    const history = new HistoryManager<string>('initial', 5);
+
+    expect(history.state).toBe('initial');
+    expect(history.canUndo).toBe(false);
+    expect(history.canRedo).toBe(false);
+
+    history.push('step-1');
+    expect(history.state).toBe('step-1');
+    expect(history.canUndo).toBe(true);
+
+    history.push('step-2');
+    expect(history.state).toBe('step-2');
+
+    // Test Undo
+    const undone = history.undo();
+    expect(undone).toBe('step-1');
+    expect(history.state).toBe('step-1');
+    expect(history.canRedo).toBe(true);
+
+    // Test Redo
+    const redone = history.redo();
+    expect(redone).toBe('step-2');
+    expect(history.state).toBe('step-2');
+    expect(history.canRedo).toBe(false);
+
+    // Test pushing new state clears redo future
+    history.undo();
+    expect(history.canRedo).toBe(true);
+    history.push('step-3');
+    expect(history.canRedo).toBe(false);
+    expect(history.state).toBe('step-3');
+  });
 });
+
