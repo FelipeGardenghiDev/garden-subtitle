@@ -3,6 +3,7 @@ import { detectContextEmoji, autoAssignEmojis } from '../src/core/emoji-detector
 import { exportToSRT, exportToVTT, exportToGardenCut } from '../src/core/exporters';
 import { KINETIC_PRESETS } from '../src/core/kinetic-styles';
 import { SubtitleSegment } from '../src/types';
+import { isNonNativeFormat } from '../src/core/ffmpeg-transcoder';
 
 describe('Garden Subtitle Core Engines', () => {
   const mockSegments: SubtitleSegment[] = [
@@ -65,5 +66,18 @@ describe('Garden Subtitle Core Engines', () => {
     expect(gardenCutProject.generator).toBe('Garden Subtitle');
     expect(gardenCutProject.tracks[0].clips).toHaveLength(2);
     expect(gardenCutProject.tracks[0].clips[0].style.color).toBe(KINETIC_PRESETS.hormozi.highlightColor);
+  });
+
+  it('correctly identifies non-native video formats for FFmpeg Wasm handling', () => {
+    expect(isNonNativeFormat('video_obs.mkv')).toBe(true);
+    expect(isNonNativeFormat('gravacao_antiga.avi')).toBe(true);
+    expect(isNonNativeFormat('stream.flv')).toBe(true);
+    expect(isNonNativeFormat('camera.wmv')).toBe(true);
+    expect(isNonNativeFormat('sony_cam.mts')).toBe(true);
+
+    expect(isNonNativeFormat('video_web.mp4')).toBe(false);
+    expect(isNonNativeFormat('video_safari.mov')).toBe(false);
+    expect(isNonNativeFormat('clip.webm')).toBe(false);
+    expect(isNonNativeFormat('audio.mp3')).toBe(false);
   });
 });

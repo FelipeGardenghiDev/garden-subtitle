@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { 
   Sparkles, Play, Pause, RotateCcw, Volume2, VolumeX,
   Upload, Download, FileText, Film, Sliders, Type,
-  Smile, Plus, Trash2, Check, ArrowRight, Wand2
+  Smile, Plus, Trash2, Check, ArrowRight, Wand2, Cpu
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { 
@@ -15,6 +15,7 @@ import { autoAssignEmojis, detectContextEmoji } from './core/emoji-detector';
 import { renderKineticSubtitleOnCanvas } from './core/canvas-renderer';
 import { exportToSRT, exportToVTT, exportToGardenCut, exportVideoWithBurnIn } from './core/exporters';
 import { DEMO_SUBTITLE_SEGMENTS, generateSegmentsFromText } from './core/demo-data';
+import { isNonNativeFormat, transcodeOrRemuxVideo, convertWebMToMP4 } from './core/ffmpeg-transcoder';
 
 export function App() {
   // Estado do Vídeo
@@ -53,17 +54,61 @@ export function App() {
     setTimeout(() => setStatusMessage(null), 3500);
   };
 
-  // Carregar vídeo via upload
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Estado de Transcodificação / Remuxing FFmpeg Wasm
+  const [isTranscoding, setIsTranscoding] = useState<boolean>(false);
+  const [transcodeProgress, setTranscodeProgress] = useState<number>(0);
+  const [transcodeStatus, setTranscodeStatus] = useState<string>('');
+  const [lastUploadedFile, setLastUploadedFile] = useState<File | null>(null);
+
+  // Executa transcode ou remuxing de um arquivo usando FFmpeg Wasm
+  const processTranscode = async (file: File) => {
+    setIsTranscoding(true);
+    setTranscodeProgress(0);
+    setTranscodeStatus('Carregando motor FFmpeg WebAssembly...');
+
+    try {
+      const result = await transcodeOrRemuxVideo(file, (pct, msg) => {
+        setTranscodeProgress(pct);
+        setTranscodeStatus(msg);
+      });
+
+      setVideoSrc(result.url);
+      setVideoName(result.fileName);
+      setCurrentTime(0);
+      setIsPlaying(false);
+      confetti({ particleCount: 70, spread: 60, origin: { y: 0.6 } });
+      showToast(result.isRemuxed
+        ? `⚡ Remuxing concluído! "${result.fileName}" pronto para reprodução.`
+        : `🎉 Vídeo convertido para MP4 com sucesso via WebAssembly!`
+      );
+    } catch (err: any) {
+      console.error(err);
+      alert('Erro ao processar vídeo no navegador: ' + (err.message || err));
+    } finally {
+      setIsTranscoding(false);
+      setTranscodeProgress(0);
+    }
+  };
+
+  // Carregar vídeo via upload (com detecção inteligente de formato)
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+
+    setLastUploadedFile(file);
+
+    // Se o formato for sabidamente não-nativo (.mkv, .avi, .wmv, .flv, .mts, etc.)
+    if (isNonNativeFormat(file.name)) {
+      await processTranscode(file);
+      return;
+    }
 
     const url = URL.createObjectURL(file);
     setVideoSrc(url);
     setVideoName(file.name);
     setCurrentTime(0);
     setIsPlaying(false);
-    showToast(`Vídeo "${file.name}" carregado com sucesso!`);
+    showToast(`Mídia "${file.name}" carregada com sucesso!`);
   };
 
   // Carregar vídeo demo interativo procedural
@@ -179,9 +224,9 @@ export function App() {
   };
 
   // MODO 1: Exportar Vídeo com Legenda Queimada (Burn-in)
-  const handleExportBurnInVideo = async () => {
+  const handleExportBurnInVideo = async (forceUniversalMP4: boolean = false) => {
     if (!videoSrc || !videoRef.current) {
-      alert('Por favor, carregue um arquivo de vídeo (.mp4 ou .webm) para gravar as legendas no vídeo final.');
+      alert('Por favor, carregue um arquivo de vídeo para gravar as legendas no vídeo final.');
       return;
     }
 
@@ -197,11 +242,20 @@ export function App() {
         (pct) => setExportProgress(pct)
       );
 
+      let outputBlob = finalBlob;
+      let ext = finalBlob.type.includes('mp4') ? 'mp4' : 'webm';
+
+      // Se o usuário solicitou explicitamente MP4 Universal e o navegador gerou WebM
+      if (forceUniversalMP4 && ext !== 'mp4') {
+        showToast('Convertendo vídeo para MP4 Universal via FFmpeg Wasm...');
+        outputBlob = await convertWebMToMP4(finalBlob, videoName, (pct) => setExportProgress(pct));
+        ext = 'mp4';
+      }
+
       // Baixar o vídeo final gravado
-      const url = URL.createObjectURL(finalBlob);
+      const url = URL.createObjectURL(outputBlob);
       const a = document.createElement('a');
       a.href = url;
-      const ext = finalBlob.type.includes('mp4') ? 'mp4' : 'webm';
       a.download = `garden_subtitle_${videoName.replace(/\.[^/.]+$/, '')}_legendado.${ext}`;
       a.click();
 
@@ -369,7 +423,12 @@ export function App() {
                     setDuration(v.duration || 10);
                   }}
                   onError={() => {
-                    showToast('⚠️ O navegador não conseguiu decodificar este codec nativamente. Recomendado: MP4, WebM, MOV ou MP3.');
+                    if (lastUploadedFile && !isTranscoding) {
+                      showToast('⚠️ Codec não suportado nativamente. Convertendo via FFmpeg WebAssembly...');
+                      processTranscode(lastUploadedFile);
+                    } else {
+                      showToast('⚠️ O navegador não conseguiu decodificar esta mídia nativamente.');
+                    }
                   }}
                   onEnded={() => setIsPlaying(false)}
                   className="hidden"
@@ -852,13 +911,22 @@ export function App() {
                     </div>
                   </div>
                 ) : (
-                  <button
-                    onClick={handleExportBurnInVideo}
-                    className="w-full py-3 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-400 hover:from-emerald-400 hover:to-teal-300 text-slate-950 font-black text-xs flex items-center justify-center gap-2 transition shadow-lg shadow-emerald-500/20 cursor-pointer active:scale-95"
-                  >
-                    <Film className="w-4 h-4 fill-slate-950" />
-                    <span>Exportar Vídeo Final com Legenda (.webm / .mp4)</span>
-                  </button>
+                  <div className="space-y-2">
+                    <button
+                      onClick={() => handleExportBurnInVideo(false)}
+                      className="w-full py-3 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-400 hover:from-emerald-400 hover:to-teal-300 text-slate-950 font-black text-xs flex items-center justify-center gap-2 transition shadow-lg shadow-emerald-500/20 cursor-pointer active:scale-95"
+                    >
+                      <Film className="w-4 h-4 fill-slate-950" />
+                      <span>Exportar Vídeo Final com Legenda (.webm / .mp4 rápido)</span>
+                    </button>
+                    <button
+                      onClick={() => handleExportBurnInVideo(true)}
+                      className="w-full py-2.5 rounded-xl bg-slate-950/80 border border-emerald-500/40 hover:bg-emerald-500/10 text-emerald-400 font-bold text-xs flex items-center justify-center gap-2 transition cursor-pointer active:scale-95"
+                    >
+                      <Cpu className="w-3.5 h-3.5" />
+                      <span>Converter para MP4 Universal (H.264 via FFmpeg Wasm)</span>
+                    </button>
+                  </div>
                 )}
               </div>
 
@@ -961,6 +1029,38 @@ export function App() {
                 Gerar Legendas e Timestamps
               </button>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: PROCESSAMENTO FFMPEG WEBASSEMBLY */}
+      {isTranscoding && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md">
+          <div className="bg-slate-900 border border-emerald-500/40 rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl text-center">
+            <div className="w-14 h-14 mx-auto rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 animate-pulse">
+              <Cpu className="w-7 h-7" />
+            </div>
+            <div>
+              <h3 className="text-base font-black text-white">Processamento WebAssembly (FFmpeg)</h3>
+              <p className="text-xs text-slate-400 mt-1">
+                Remuxando ou transcodificando mídia para formato compatível com o navegador
+              </p>
+            </div>
+            <div className="space-y-2 py-2 text-left">
+              <div className="flex justify-between text-xs font-semibold">
+                <span className="text-emerald-300 truncate max-w-[260px]">{transcodeStatus}</span>
+                <span className="font-mono text-emerald-400 font-bold">{transcodeProgress}%</span>
+              </div>
+              <div className="w-full h-3 bg-slate-950 rounded-full overflow-hidden border border-slate-800">
+                <div
+                  className="h-full bg-gradient-to-r from-emerald-500 to-teal-400 rounded-full transition-all duration-300"
+                  style={{ width: `${Math.max(5, transcodeProgress)}%` }}
+                />
+              </div>
+            </div>
+            <p className="text-[11px] text-slate-500">
+              🔒 100% no seu navegador: nenhum arquivo é enviado para servidores externos.
+            </p>
           </div>
         </div>
       )}

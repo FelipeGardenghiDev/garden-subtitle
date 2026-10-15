@@ -58,22 +58,32 @@ flowchart TD
 
 ---
 
+## 📥 Formatos de Entrada Suportados
+
+* **Nativos Diretos:** `.mp4`, `.webm`, `.mov` (QuickTime iPhone/Mac), `.m4v`, `.ogg`
+* **Áudios (Podcasts & Locuções):** `.mp3`, `.wav`, `.m4a`, `.aac`, `.flac`
+* **Formatos Estendidos via FFmpeg WebAssembly:** `.mkv` (OBS Studio), `.avi`, `.wmv`, `.flv`, `.mts`, `.ts` (com remuxing automático sem perda ou transcode local direto na máquina do usuário sem envio para a nuvem).
+
+---
+
 ## 📦 Formatos de Exportação Suportados
 
 * **Pacote Nativo GardenCut (`.garden-sub`):** Importável diretamente na trilha `track-text` do [GardenCut](https://github.com/FelipeGardenghiDev/garden-cut).
 * **Legendas Padrão de Mercado:** `.srt`, WebVTT (`.vtt`) e Advanced SubStation Alpha (`.ass` com estilos e fontes embutidos).
-* **Vídeo Final com Legenda Fixa (*Burn-in*):** Renderização direta do vídeo final em formato vertical (9:16) ou horizontal (16:9) em WebM/MP4.
+* **Vídeo Final com Legenda Fixa (*Burn-in*):** 
+  * Exportação instantânea em `.webm` / `.mp4` nativo via Canvas Stream + MediaRecorder.
+  * Exportação Universal MP4 (H.264) via motor FFmpeg WebAssembly integrado.
 
 ---
 
 ## 🛠️ Stack Tecnológica
 
-* **Linguagem:** TypeScript 5.8+
+* **Linguagem:** TypeScript ~6.0
 * **Framework:** React 19 + Vite 8
 * **Estilização:** Tailwind CSS v4
-* **Motor IA Local:** ONNX Runtime Web / Whisper WebAssembly
+* **Motor IA & Transcode:** FFmpeg WebAssembly (`@ffmpeg/ffmpeg`) + Whisper WebAssembly
 * **DSP de Áudio:** Web Audio API (`AudioContext`, `OfflineAudioContext`)
-* **Testes:** Vitest + Oxlint
+* **Testes & Qualidade:** Vitest + Oxlint
 
 ---
 
