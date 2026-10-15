@@ -5,6 +5,7 @@ import { KINETIC_PRESETS } from '../src/core/kinetic-styles';
 import { SubtitleSegment } from '../src/types';
 import { isNonNativeFormat } from '../src/core/ffmpeg-transcoder';
 import { parseSRT, parseVTT, parseSubtitleTime } from '../src/core/subtitle-parsers';
+import { exportToFCPXML, exportToPremiereProject, exportToAfterEffectsScript } from '../src/core/nle-exporters';
 
 describe('Garden Subtitle Core Engines', () => {
   const mockSegments: SubtitleSegment[] = [
@@ -125,5 +126,27 @@ Pegando fogo no estúdio`;
     expect(KINETIC_PRESETS['ali-abdaal'].highlighter).toBe(true);
     expect(KINETIC_PRESETS['ali-abdaal'].rotation).toBe(-2);
     expect(KINETIC_PRESETS['karaoke-wave'].karaokeProgressive).toBe(true);
+  });
+
+  it('exports valid Final Cut Pro 7 XML (.xml) for DaVinci Resolve, Vegas and Premiere', () => {
+    const xml = exportToFCPXML(mockSegments, KINETIC_PRESETS.hormozi, 'video.mp4', 5.0);
+    expect(xml).toContain('<?xml version="1.0" encoding="UTF-8"?>');
+    expect(xml).toContain('<xmeml version="4">');
+    expect(xml).toContain('<generatoritem id="text-clip-1">');
+    expect(xml).toContain('Muito dinheiro e vendas');
+  });
+
+  it('exports valid Premiere Pro Project (.prproj) Gzipped Blob', async () => {
+    const prprojBlob = await exportToPremiereProject(mockSegments, KINETIC_PRESETS.hormozi, 'video.mp4', 5.0);
+    expect(prprojBlob).toBeInstanceOf(Blob);
+    expect(prprojBlob.size).toBeGreaterThan(50);
+  });
+
+  it('exports valid After Effects ExtendScript (.jsx)', () => {
+    const jsx = exportToAfterEffectsScript(mockSegments, KINETIC_PRESETS.mrbeast, 'video.mp4', 5.0);
+    expect(jsx).toContain('app.beginUndoGroup');
+    expect(jsx).toContain('app.project.items.addComp');
+    expect(jsx).toContain('myComp.layers.addText');
+    expect(jsx).toContain('scaleProp.setValueAtTime');
   });
 });

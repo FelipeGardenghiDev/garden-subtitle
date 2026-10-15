@@ -3,7 +3,7 @@ import {
   Sparkles, Play, Pause, RotateCcw, Volume2, VolumeX,
   Upload, Download, FileText, Film, Sliders, Type,
   Smile, Plus, Trash2, Check, ArrowRight, Wand2, Cpu,
-  Mic, Layers, Zap
+  Mic, Layers, Zap, Radio, X
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { 
@@ -26,6 +26,7 @@ import { DEMO_SUBTITLE_SEGMENTS, generateSegmentsFromText } from './core/demo-da
 import { isNonNativeFormat, transcodeOrRemuxVideo, convertWebMToMP4 } from './core/ffmpeg-transcoder';
 import { parseSubtitleFile, createWordTimestamps } from './core/subtitle-parsers';
 import { isSpeechRecognitionSupported, transcribeMediaElement } from './core/speech-transcriber';
+import { exportToFCPXML, exportToPremiereProject, exportToAfterEffectsScript } from './core/nle-exporters';
 
 export function App() {
   // Estado do Vídeo
@@ -76,6 +77,13 @@ export function App() {
   const [isTranscribingAudio, setIsTranscribingAudio] = useState<boolean>(false);
   const [liveTranscriptionText, setLiveTranscriptionText] = useState<string>('');
   const [editingEmojiSegmentId, setEditingEmojiSegmentId] = useState<string | null>(null);
+
+  // Estados OBS Studio Live Mode & Broadcast
+  const [isOBSLiveMode, setIsOBSLiveMode] = useState<boolean>(false);
+  const [obsChromaMode, setObsChromaMode] = useState<'transparent' | 'green' | 'magenta' | 'black'>('transparent');
+  const [isLiveMicActive, setIsLiveMicActive] = useState<boolean>(false);
+  const liveRecognitionRef = useRef<any>(null);
+  const obsCanvasRef = useRef<HTMLCanvasElement>(null);
 
   // Executa transcode ou remuxing de um arquivo usando FFmpeg Wasm
   const processTranscode = async (file: File) => {
@@ -340,6 +348,140 @@ export function App() {
     renderFrame();
   }, [renderFrame]);
 
+  // Tecla ESC para sair do Modo OBS Live
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isOBSLiveMode) {
+        setIsOBSLiveMode(false);
+        if (liveRecognitionRef.current) {
+          liveRecognitionRef.current.stop();
+          liveRecognitionRef.current = null;
+          setIsLiveMicActive(false);
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOBSLiveMode]);
+
+  // Loop de renderização contínuo do Modo OBS Live (Overlay limpo / Chroma)
+  useEffect(() => {
+    if (!isOBSLiveMode) return;
+
+    let animId: number;
+    const canvas = obsCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const renderObs = () => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      if (obsChromaMode === 'green') {
+        ctx.fillStyle = '#00FF00';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+      } else if (obsChromaMode === 'magenta') {
+        ctx.fillStyle = '#FF00FF';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+      } else if (obsChromaMode === 'black') {
+        ctx.fillStyle = '#000000';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+      }
+
+      const activeTime = videoRef.current ? videoRef.current.currentTime : currentTime;
+
+      renderKineticSubtitleOnCanvas(
+        ctx,
+        null,
+        canvas.width,
+        canvas.height,
+        activeTime,
+        segments,
+        kineticConfig,
+        obsChromaMode === 'transparent'
+      );
+
+      animId = requestAnimationFrame(renderObs);
+    };
+
+    animId = requestAnimationFrame(renderObs);
+    return () => cancelAnimationFrame(animId);
+  }, [isOBSLiveMode, obsChromaMode, currentTime, segments, kineticConfig]);
+
+  // Alternar microfone ao vivo para OBS
+  const toggleLiveMic = () => {
+    if (!isSpeechRecognitionSupported()) {
+      alert('Reconhecimento de fala não suportado neste navegador. Use Google Chrome ou Edge.');
+      return;
+    }
+
+    if (isLiveMicActive) {
+      if (liveRecognitionRef.current) {
+        liveRecognitionRef.current.stop();
+        liveRecognitionRef.current = null;
+      }
+      setIsLiveMicActive(false);
+      showToast('Microfone OBS desativado.');
+    } else {
+      try {
+        const SpeechRec = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+        const recognition = new SpeechRec();
+        recognition.continuous = true;
+        recognition.interimResults = true;
+        recognition.lang = 'pt-BR';
+
+        recognition.onresult = (event: any) => {
+          const lastResult = event.results[event.results.length - 1];
+          const transcript = lastResult[0].transcript.trim();
+          if (transcript) {
+            const now = videoRef.current ? videoRef.current.currentTime : currentTime;
+            const words = transcript.split(/\s+/).map((w: string, idx: number) => ({
+              id: `live-w-${Date.now()}-${idx}`,
+              word: w,
+              start: now + idx * 0.25,
+              end: now + (idx + 1) * 0.25
+            }));
+            const emoji = detectContextEmoji(transcript);
+            const liveSeg: SubtitleSegment = {
+              id: 'live-seg-active',
+              start: now,
+              end: now + Math.max(2.5, words.length * 0.4),
+              text: transcript,
+              emoji: emoji || undefined,
+              words
+            };
+            setSegments(prev => {
+              const filtered = prev.filter(s => s.id !== 'live-seg-active');
+              return [...filtered, liveSeg];
+            });
+          }
+        };
+
+        recognition.onerror = (e: any) => {
+          console.error('Speech recognition error:', e);
+        };
+
+        recognition.onend = () => {
+          if (isLiveMicActive && liveRecognitionRef.current) {
+            try {
+              liveRecognitionRef.current.start();
+            } catch {
+              // Ignore restart error
+            }
+          }
+        };
+
+        recognition.start();
+        liveRecognitionRef.current = recognition;
+        setIsLiveMicActive(true);
+        showToast('🎙️ Microfone ao vivo ATIVO! Suas falas serão legendadas na tela.');
+      } catch (err: any) {
+        console.error(err);
+        alert('Erro ao ativar microfone: ' + (err.message || err));
+      }
+    }
+  };
+
   // Trocar Preset de Estilo
   const handleSelectPreset = (style: KineticStyle) => {
     setKineticConfig(KINETIC_PRESETS[style]);
@@ -502,6 +644,68 @@ export function App() {
     showToast('Arquivo de legendas avançadas .ASS baixado com sucesso!');
   };
 
+  // MODO 3A: Exportar Projeto Adobe Premiere Pro (.prproj)
+  const handleExportPremiere = async () => {
+    try {
+      const w = aspectRatio === '9:16' ? 1080 : 1920;
+      const h = aspectRatio === '9:16' ? 1920 : 1080;
+      const blob = await exportToPremiereProject(segments, kineticConfig, videoName, duration, w, h, 30);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${videoName.replace(/\.[^/.]+$/, '')}_premiere.prproj`;
+      a.click();
+      URL.revokeObjectURL(url);
+      confetti({ particleCount: 70, spread: 60, origin: { y: 0.6 } });
+      showToast('🎬 Projeto Adobe Premiere (.prproj) gerado com sucesso!');
+    } catch (err: any) {
+      console.error(err);
+      alert('Erro ao gerar projeto Premiere: ' + (err.message || err));
+    }
+  };
+
+  // MODO 3B: Exportar Timeline Universal XML (DaVinci Resolve / Sony Vegas Pro / Final Cut Pro)
+  const handleExportFCPXML = () => {
+    try {
+      const w = aspectRatio === '9:16' ? 1080 : 1920;
+      const h = aspectRatio === '9:16' ? 1920 : 1080;
+      const xmlContent = exportToFCPXML(segments, kineticConfig, videoName, duration, w, h, 30);
+      const blob = new Blob([xmlContent], { type: 'application/xml;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${videoName.replace(/\.[^/.]+$/, '')}_timeline.xml`;
+      a.click();
+      URL.revokeObjectURL(url);
+      confetti({ particleCount: 70, spread: 60, origin: { y: 0.6 } });
+      showToast('🎞️ Timeline XML exportada para DaVinci Resolve, Sony Vegas e Final Cut!');
+    } catch (err: any) {
+      console.error(err);
+      alert('Erro ao exportar XML: ' + (err.message || err));
+    }
+  };
+
+  // MODO 3C: Exportar Script Adobe After Effects (.jsx)
+  const handleExportAfterEffects = () => {
+    try {
+      const w = aspectRatio === '9:16' ? 1080 : 1920;
+      const h = aspectRatio === '9:16' ? 1920 : 1080;
+      const scriptContent = exportToAfterEffectsScript(segments, kineticConfig, videoName, duration, w, h, 30);
+      const blob = new Blob([scriptContent], { type: 'text/javascript;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${videoName.replace(/\.[^/.]+$/, '')}_subtitles.jsx`;
+      a.click();
+      URL.revokeObjectURL(url);
+      confetti({ particleCount: 70, spread: 60, origin: { y: 0.6 } });
+      showToast('⚡ Script After Effects (.jsx) exportado! Execute em Arquivo > Scripts no AE.');
+    } catch (err: any) {
+      console.error(err);
+      alert('Erro ao exportar script After Effects: ' + (err.message || err));
+    }
+  };
+
   // Formatação de Tempo (00:00.0)
   const formatTime = (secs: number) => {
     const m = Math.floor(secs / 60);
@@ -594,6 +798,15 @@ export function App() {
             >
               <Wand2 className="w-3.5 h-3.5" />
               <span>Usar Demo</span>
+            </button>
+
+            <button
+              onClick={() => setIsOBSLiveMode(true)}
+              className="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-purple-500/10 border border-purple-500/30 hover:bg-purple-500/20 text-xs font-bold text-purple-300 transition cursor-pointer"
+              title="Abrir Modo Live Overlay para OBS Studio e Streaming"
+            >
+              <Radio className="w-3.5 h-3.5 text-purple-400 animate-pulse" />
+              <span>Modo OBS Studio</span>
             </button>
           </div>
         </div>
@@ -1382,6 +1595,136 @@ export function App() {
                   </button>
                 </div>
               </div>
+
+              {/* CARD MODO 3: SOFTWARES INDUSTRIAIS NLE (PREMIERE, DAVINCI, VEGAS, AFTER EFFECTS) */}
+              <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-3">
+                <div className="flex items-center gap-2">
+                  <div className="p-2 rounded-xl bg-purple-500/10 text-purple-400">
+                    <Sliders className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-bold uppercase text-white">
+                      Modo 3: Editores Profissionais NLE
+                    </h4>
+                    <p className="text-[10px] text-slate-400">Projetos nativos para Adobe Premiere Pro, DaVinci Resolve, Sony Vegas e After Effects</p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
+                  {/* Adobe Premiere Pro .prproj */}
+                  <button
+                    onClick={handleExportPremiere}
+                    className="p-3.5 rounded-xl bg-slate-900 border border-slate-800 hover:border-purple-500/50 text-left transition cursor-pointer flex flex-col justify-between group"
+                  >
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-xs font-bold text-purple-400">🎬 Adobe Premiere Pro</span>
+                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 font-mono font-bold">.prproj</span>
+                      </div>
+                      <p className="text-[10px] text-slate-400 leading-tight">
+                        Projeto nativo compactado em gzip. Abre com 2 cliques no Windows/Mac com timeline pronta.
+                      </p>
+                    </div>
+                    <span className="text-[10px] font-mono text-purple-300 mt-3 flex items-center gap-1 font-bold group-hover:translate-x-0.5 transition-transform">
+                      Baixar .prproj <ArrowRight className="w-3 h-3" />
+                    </span>
+                  </button>
+
+                  {/* DaVinci Resolve & Sony Vegas .xml */}
+                  <button
+                    onClick={handleExportFCPXML}
+                    className="p-3.5 rounded-xl bg-slate-900 border border-slate-800 hover:border-pink-500/50 text-left transition cursor-pointer flex flex-col justify-between group"
+                  >
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-xs font-bold text-pink-400">🎞️ DaVinci & Sony Vegas</span>
+                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-pink-500/20 text-pink-300 font-mono font-bold">.xml</span>
+                      </div>
+                      <p className="text-[10px] text-slate-400 leading-tight">
+                        Timeline Universal FCP 7 XML com cortes sincronizados e geradores de títulos por palavra.
+                      </p>
+                    </div>
+                    <span className="text-[10px] font-mono text-pink-300 mt-3 flex items-center gap-1 font-bold group-hover:translate-x-0.5 transition-transform">
+                      Baixar .xml <ArrowRight className="w-3 h-3" />
+                    </span>
+                  </button>
+
+                  {/* Adobe After Effects .jsx */}
+                  <button
+                    onClick={handleExportAfterEffects}
+                    className="p-3.5 rounded-xl bg-slate-900 border border-slate-800 hover:border-amber-500/50 text-left transition cursor-pointer flex flex-col justify-between group"
+                  >
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-xs font-bold text-amber-400">⚡ Adobe After Effects</span>
+                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 font-mono font-bold">.jsx</span>
+                      </div>
+                      <p className="text-[10px] text-slate-400 leading-tight">
+                        Script ExtendScript que cria camadas de texto vetoriais com keyframes de pop/zoom nativos.
+                      </p>
+                    </div>
+                    <span className="text-[10px] font-mono text-amber-300 mt-3 flex items-center gap-1 font-bold group-hover:translate-x-0.5 transition-transform">
+                      Baixar .jsx <ArrowRight className="w-3 h-3" />
+                    </span>
+                  </button>
+                </div>
+              </div>
+
+              {/* CARD MODO 4: OBS STUDIO & BROADCAST LIVE */}
+              <div className="p-4 rounded-2xl bg-slate-950 border border-purple-500/30 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="p-2 rounded-xl bg-purple-500/10 text-purple-400">
+                      <Radio className="w-5 h-5 animate-pulse" />
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-bold uppercase text-white flex items-center gap-2">
+                        Modo 4: OBS Studio & Broadcast Live
+                        <span className="text-[9px] px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 font-semibold">Streaming</span>
+                      </h4>
+                      <p className="text-[10px] text-slate-400">Use legendas dinâmicas ao vivo em suas streams na Twitch, YouTube ou gravações</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
+                  <button
+                    onClick={() => setIsOBSLiveMode(true)}
+                    className="p-3.5 rounded-xl bg-purple-950/30 border border-purple-500/40 hover:bg-purple-900/30 text-left transition cursor-pointer flex flex-col justify-between group"
+                  >
+                    <div>
+                      <div className="flex items-center gap-1.5 mb-1">
+                        <Radio className="w-4 h-4 text-purple-400" />
+                        <span className="text-xs font-bold text-purple-300">Abrir Janela OBS Live Overlay</span>
+                      </div>
+                      <p className="text-[10px] text-slate-400 leading-tight">
+                        Exibe tela limpa com fundo transparente ou Chroma Key para capturar no OBS Studio via "Captura de Janela" ou "Navegador".
+                      </p>
+                    </div>
+                    <span className="text-[10px] font-mono text-purple-300 mt-3 flex items-center gap-1 font-bold group-hover:translate-x-0.5 transition-transform">
+                      Abrir Overlay Live <ArrowRight className="w-3 h-3" />
+                    </span>
+                  </button>
+
+                  <button
+                    onClick={handleExportTransparentOverlay}
+                    className="p-3.5 rounded-xl bg-slate-900 border border-slate-800 hover:border-cyan-500/40 text-left transition cursor-pointer flex flex-col justify-between group"
+                  >
+                    <div>
+                      <div className="flex items-center gap-1.5 mb-1">
+                        <Layers className="w-4 h-4 text-cyan-400" />
+                        <span className="text-xs font-bold text-cyan-300">Vídeo WebM Alpha para OBS</span>
+                      </div>
+                      <p className="text-[10px] text-slate-400 leading-tight">
+                        Gera vídeo com canal Alpha transparente para colocar como "Fonte de Mídia" (Media Source) no OBS Studio.
+                      </p>
+                    </div>
+                    <span className="text-[10px] font-mono text-cyan-300 mt-3 flex items-center gap-1 font-bold group-hover:translate-x-0.5 transition-transform">
+                      Exportar Alpha WebM <Download className="w-3 h-3" />
+                    </span>
+                  </button>
+                </div>
+              </div>
             </div>
           )}
         </section>
@@ -1455,6 +1798,125 @@ export function App() {
             <p className="text-[11px] text-slate-500">
               🔒 100% no seu navegador: nenhum arquivo é enviado para servidores externos.
             </p>
+          </div>
+        </div>
+      )}
+
+      {/* TELA DE OVERLAY OBS STUDIO (STREAMING / LIVE BROADCAST) */}
+      {isOBSLiveMode && (
+        <div 
+          className={`fixed inset-0 z-50 flex flex-col items-center justify-between ${
+            obsChromaMode === 'green' ? 'bg-[#00FF00]' :
+            obsChromaMode === 'magenta' ? 'bg-[#FF00FF]' :
+            obsChromaMode === 'black' ? 'bg-black' :
+            'bg-slate-950/90 backdrop-blur-xs'
+          }`}
+        >
+          {/* Barra Flutuante de Controle OBS (Minimalista) */}
+          <div className="w-full max-w-5xl mx-auto p-4 flex flex-wrap items-center justify-between gap-3 bg-slate-950/80 backdrop-blur-md rounded-2xl border border-slate-800 m-4 shadow-2xl z-10">
+            <div className="flex items-center gap-2.5">
+              <div className="w-3 h-3 rounded-full bg-red-500 animate-ping" />
+              <span className="text-xs font-black tracking-wider uppercase text-white flex items-center gap-1.5">
+                <Radio className="w-4 h-4 text-purple-400" />
+                OBS Studio Live Overlay
+              </span>
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 font-bold border border-purple-500/30">
+                {aspectRatio} &middot; 60 FPS
+              </span>
+            </div>
+
+            {/* Controles de Fundo / Chroma */}
+            <div className="flex items-center gap-1.5 bg-slate-900 p-1 rounded-xl border border-slate-800 text-[11px]">
+              <span className="text-slate-400 px-2 font-medium">Fundo:</span>
+              <button
+                onClick={() => setObsChromaMode('transparent')}
+                className={`px-2.5 py-1 rounded-lg font-bold transition cursor-pointer ${
+                  obsChromaMode === 'transparent' ? 'bg-purple-600 text-white' : 'text-slate-300 hover:text-white'
+                }`}
+              >
+                Transparente (Navegador)
+              </button>
+              <button
+                onClick={() => setObsChromaMode('green')}
+                className={`px-2.5 py-1 rounded-lg font-bold transition cursor-pointer ${
+                  obsChromaMode === 'green' ? 'bg-emerald-500 text-slate-950' : 'text-slate-300 hover:text-white'
+                }`}
+              >
+                Verde Chroma
+              </button>
+              <button
+                onClick={() => setObsChromaMode('magenta')}
+                className={`px-2.5 py-1 rounded-lg font-bold transition cursor-pointer ${
+                  obsChromaMode === 'magenta' ? 'bg-pink-500 text-white' : 'text-slate-300 hover:text-white'
+                }`}
+              >
+                Magenta Chroma
+              </button>
+              <button
+                onClick={() => setObsChromaMode('black')}
+                className={`px-2.5 py-1 rounded-lg font-bold transition cursor-pointer ${
+                  obsChromaMode === 'black' ? 'bg-slate-700 text-white' : 'text-slate-300 hover:text-white'
+                }`}
+              >
+                Preto
+              </button>
+            </div>
+
+            {/* Ações e Fechar */}
+            <div className="flex items-center gap-2">
+              <button
+                onClick={toggleLiveMic}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
+                  isLiveMicActive
+                    ? 'bg-red-500 text-white animate-pulse shadow-lg shadow-red-500/30'
+                    : 'bg-slate-900 border border-slate-700 text-slate-300 hover:text-white'
+                }`}
+                title="Transcrever e legendar sua fala em tempo real na live"
+              >
+                <Mic className="w-3.5 h-3.5" />
+                <span>{isLiveMicActive ? 'Ouvindo Microfone...' : 'Legendar Voz ao Vivo'}</span>
+              </button>
+
+              <button
+                onClick={togglePlay}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-700 text-xs font-bold text-slate-300 hover:text-white transition cursor-pointer"
+              >
+                {isPlaying ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
+                <span>{isPlaying ? 'Pausar' : 'Reproduzir'}</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  setIsOBSLiveMode(false);
+                  if (liveRecognitionRef.current) {
+                    liveRecognitionRef.current.stop();
+                    liveRecognitionRef.current = null;
+                    setIsLiveMicActive(false);
+                  }
+                }}
+                className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition cursor-pointer"
+                title="Sair do Modo OBS (ESC)"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+
+          {/* Área Central: Canvas OBS */}
+          <div className="flex-1 w-full flex items-center justify-center p-4 relative overflow-hidden">
+            <canvas
+              ref={obsCanvasRef}
+              width={aspectRatio === '9:16' ? 1080 : 1920}
+              height={aspectRatio === '9:16' ? 1920 : 1080}
+              className={`max-h-full max-w-full object-contain ${
+                obsChromaMode === 'transparent' ? 'drop-shadow-2xl' : ''
+              }`}
+            />
+          </div>
+
+          {/* Dica de Configuração do OBS no Rodapé */}
+          <div className="w-full max-w-3xl mx-auto p-2.5 mb-3 bg-slate-950/80 backdrop-blur-md rounded-xl border border-slate-800/80 text-center text-[11px] text-slate-400">
+            💡 <strong className="text-white">Como usar no OBS Studio:</strong> Adicione esta janela como <span className="text-purple-300 font-bold">Captura de Janela</span> (Window Capture) e adicione o filtro <span className="text-purple-300 font-bold">Color Key / Chroma Key</span> se usar fundo verde, ou use como <span className="text-purple-300 font-bold">Fonte de Navegador</span> (Browser Source).
           </div>
         </div>
       )}
