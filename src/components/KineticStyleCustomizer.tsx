@@ -169,20 +169,21 @@ export const KineticStyleCustomizer: React.FC<KineticStyleCustomizerProps> = ({
             />
           </div>
 
-          {/* Cor de Destaque */}
+          {/* Espessura da Borda (Stroke Width) */}
           <div>
-            <label className="text-[11px] text-slate-400 block mb-1">Cor do Destaque:</label>
-            <div className="flex items-center gap-2">
-              <input
-                type="color"
-                value={kineticConfig.highlightColor}
-                onChange={(e) => onUpdateConfig({ highlightColor: e.target.value })}
-                className="w-8 h-8 rounded-lg bg-transparent border-0 cursor-pointer"
-              />
-              <span className="font-mono text-xs text-slate-300 font-bold uppercase">
-                {kineticConfig.highlightColor}
-              </span>
+            <div className="flex justify-between text-[11px] text-slate-400 mb-1">
+              <span>Espessura da Borda:</span>
+              <span className="font-mono text-emerald-400 font-bold">{kineticConfig.strokeWidth}px</span>
             </div>
+            <input
+              type="range"
+              min={0}
+              max={12}
+              step={1}
+              value={kineticConfig.strokeWidth}
+              onChange={(e) => onUpdateConfig({ strokeWidth: parseInt(e.target.value) })}
+              className="w-full accent-emerald-500 h-1.5 bg-slate-800 rounded-lg cursor-pointer"
+            />
           </div>
 
           {/* Palavras por Linha */}
@@ -199,6 +200,67 @@ export const KineticStyleCustomizer: React.FC<KineticStyleCustomizerProps> = ({
               <option value={4}>4 Palavras (Padrão Hormozi)</option>
               <option value={6}>6 Palavras</option>
             </select>
+          </div>
+
+          {/* Cor de Destaque */}
+          <div>
+            <label className="text-[11px] text-slate-400 block mb-1">Cor da Palavra Ativa:</label>
+            <div className="flex items-center gap-2">
+              <input
+                type="color"
+                value={kineticConfig.highlightColor}
+                onChange={(e) => onUpdateConfig({ highlightColor: e.target.value })}
+                className="w-8 h-8 rounded-lg bg-transparent border-0 cursor-pointer"
+              />
+              <span className="font-mono text-xs text-slate-300 font-bold uppercase">
+                {kineticConfig.highlightColor}
+              </span>
+            </div>
+          </div>
+
+          {/* Cor do Texto Inativo */}
+          <div>
+            <label className="text-[11px] text-slate-400 block mb-1">Cor do Texto Base:</label>
+            <div className="flex items-center gap-2">
+              <input
+                type="color"
+                value={kineticConfig.textColor.startsWith('#') ? kineticConfig.textColor : '#ffffff'}
+                onChange={(e) => onUpdateConfig({ textColor: e.target.value })}
+                className="w-8 h-8 rounded-lg bg-transparent border-0 cursor-pointer"
+              />
+              <span className="font-mono text-xs text-slate-300 font-bold uppercase">
+                {kineticConfig.textColor}
+              </span>
+            </div>
+          </div>
+
+          {/* Cor do Contorno */}
+          <div>
+            <label className="text-[11px] text-slate-400 block mb-1">Cor da Borda (Stroke):</label>
+            <div className="flex items-center gap-2">
+              <input
+                type="color"
+                value={kineticConfig.strokeColor}
+                onChange={(e) => onUpdateConfig({ strokeColor: e.target.value })}
+                className="w-8 h-8 rounded-lg bg-transparent border-0 cursor-pointer"
+              />
+              <span className="font-mono text-xs text-slate-300 font-bold uppercase">
+                {kineticConfig.strokeColor}
+              </span>
+            </div>
+          </div>
+
+          {/* Toggle de Emojis Animados */}
+          <div className="flex flex-col justify-end">
+            <label className="flex items-center justify-between p-2 rounded-xl bg-slate-900 border border-slate-800 cursor-pointer hover:border-slate-700 transition">
+              <span className="text-[11px] font-bold text-slate-300">Emojis Animados</span>
+              <input
+                type="checkbox"
+                checked={kineticConfig.enableEmojis}
+                onChange={(e) => onUpdateConfig({ enableEmojis: e.target.checked })}
+                className="accent-emerald-500 w-4 h-4 rounded cursor-pointer"
+              />
+            </label>
           </div>
         </div>
       </div>

@@ -1,4 +1,34 @@
-import { SubtitleSegment, KineticConfig } from '../types';
+import { SubtitleSegment, KineticConfig, WordTimestamp } from '../types';
+
+/**
+ * Retorna a página (bloco) de palavras do segmento correspondente ao tempo atual,
+ * evitando que segmentos longos cortem palavras após maxWordsPerLine.
+ */
+export function getActiveWordPage(
+  words: WordTimestamp[],
+  currentTime: number,
+  maxWordsPerLine = 4
+): WordTimestamp[] {
+  if (!words || words.length === 0) return [];
+  const pageSize = Math.max(1, maxWordsPerLine || 4);
+  if (words.length <= pageSize) return words;
+
+  // Procura palavra exatamente ativa ou a última palavra cujo início já passou
+  let activeIndex = words.findIndex(w => currentTime >= w.start && currentTime <= w.end);
+  if (activeIndex === -1) {
+    for (let i = words.length - 1; i >= 0; i--) {
+      if (currentTime >= words[i].start) {
+        activeIndex = i;
+        break;
+      }
+    }
+  }
+  if (activeIndex === -1) activeIndex = 0;
+
+  const pageIndex = Math.floor(activeIndex / pageSize);
+  const startIdx = pageIndex * pageSize;
+  return words.slice(startIdx, startIdx + pageSize);
+}
 
 /**
  * Renderiza um frame do vídeo com as legendas cinéticas sobre o Canvas 2D
@@ -68,23 +98,40 @@ export function renderKineticSubtitleOnCanvas(
 
   // Ajuste de escala proporcional para resolução do canvas
   const scaleFactor = Math.min(canvasWidth / 720, canvasHeight / 1280);
-  const calculatedFontSize = Math.max(24, Math.round(config.fontSize * (scaleFactor > 0 ? scaleFactor : 1)));
+  let calculatedFontSize = Math.max(24, Math.round(config.fontSize * (scaleFactor > 0 ? scaleFactor : 1)));
   ctx.font = `${fontWeight} ${calculatedFontSize}px ${fontFamily}`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
 
-  // 5. Medir palavras e calcular quebra de linha
-  const wordsToRender = activeSegment.words.slice(0, config.maxWordsPerLine || 4);
-  const wordSpacings = calculatedFontSize * 0.35;
+  // 5. Paginar palavras do segmento conforme maxWordsPerLine e medir largura
+  const wordsToRender = getActiveWordPage(activeSegment.words, currentTime, config.maxWordsPerLine || 4);
+  let wordSpacings = calculatedFontSize * 0.35;
 
   let totalLineWidth = 0;
-  const wordWidths: number[] = wordsToRender.map(w => {
+  let wordWidths: number[] = wordsToRender.map(w => {
     const rawText = isUpperCase ? w.word.toUpperCase() : w.word;
     const width = ctx.measureText(rawText).width;
     totalLineWidth += width;
     return width;
   });
   totalLineWidth += (wordsToRender.length - 1) * wordSpacings;
+
+  // Se a linha ultrapassar 88% da largura do canvas, reduz proporcionalmente a fonte para caber sem cortar
+  const maxAllowedWidth = canvasWidth * 0.88;
+  if (totalLineWidth > maxAllowedWidth && totalLineWidth > 0) {
+    const fitRatio = maxAllowedWidth / totalLineWidth;
+    calculatedFontSize = Math.max(18, Math.floor(calculatedFontSize * fitRatio));
+    ctx.font = `${fontWeight} ${calculatedFontSize}px ${fontFamily}`;
+    wordSpacings = calculatedFontSize * 0.35;
+    totalLineWidth = 0;
+    wordWidths = wordsToRender.map(w => {
+      const rawText = isUpperCase ? w.word.toUpperCase() : w.word;
+      const width = ctx.measureText(rawText).width;
+      totalLineWidth += width;
+      return width;
+    });
+    totalLineWidth += (wordsToRender.length - 1) * wordSpacings;
+  }
 
   // Posição Y da linha na tela
   const baselineY = (canvasHeight * (config.positionY / 100));

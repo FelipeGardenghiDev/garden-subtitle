@@ -9,7 +9,7 @@ interface OBSLiveOverlayProps {
   toggleLiveMic: () => void;
   isPlaying: boolean;
   togglePlay: () => void;
-  aspectRatio: '9:16' | '16:9';
+  aspectRatio: '9:16' | '16:9' | '1:1';
   obsCanvasRef: React.RefObject<HTMLCanvasElement | null>;
   onClose: () => void;
 }
@@ -135,7 +135,7 @@ export const OBSLiveOverlay: React.FC<OBSLiveOverlayProps> = ({
       <div className="flex-1 w-full flex items-center justify-center p-4 relative overflow-hidden">
         <canvas
           ref={obsCanvasRef}
-          width={aspectRatio === '9:16' ? 1080 : 1920}
+          width={aspectRatio === '16:9' ? 1920 : 1080}
           height={aspectRatio === '9:16' ? 1920 : 1080}
           className={`max-h-full max-w-full object-contain ${
             obsChromaMode === 'transparent' ? 'drop-shadow-2xl' : ''

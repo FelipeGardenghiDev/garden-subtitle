@@ -212,7 +212,20 @@ function formatASSTime(seconds: number): string {
 }
 
 /**
- * Exporta para arquivo Advanced SubStation Alpha (.ass) com estilos avançados embutidos
+ * Converte cor hexadecimal #RRGGBB para o padrão SubStation Alpha BGR (&H00BBGGRR)
+ */
+export function hexToASSColor(hex: string | undefined, fallback = '&H00FFFFFF'): string {
+  if (!hex || !hex.startsWith('#')) return fallback;
+  const clean = hex.replace('#', '').trim();
+  if (clean.length !== 6) return fallback;
+  const r = clean.slice(0, 2).toUpperCase();
+  const g = clean.slice(2, 4).toUpperCase();
+  const b = clean.slice(4, 6).toUpperCase();
+  return `&H00${b}${g}${r}`;
+}
+
+/**
+ * Exporta para arquivo Advanced SubStation Alpha (.ass) com estilos avançados e tags cinéticas {\k} por palavra
  */
 export function exportToASS(
   segments: SubtitleSegment[],
@@ -221,6 +234,11 @@ export function exportToASS(
   videoHeight = 1920
 ): string {
   const fontName = config.style === 'mrbeast' ? 'Titan One' : config.style === 'ali-abdaal' ? 'Plus Jakarta Sans' : 'Montserrat';
+  const primaryColor = hexToASSColor(config.highlightColor, '&H0047E0FD');
+  const secondaryColor = hexToASSColor(config.textColor, '&H00FFFFFF');
+  const outlineColor = hexToASSColor(config.strokeColor, '&H00000000');
+  const marginV = Math.max(20, Math.round(videoHeight * ((100 - (config.positionY || 75)) / 100)));
+
   const header = `[Script Info]
 Title: Garden Subtitle Export
 ScriptType: v4.00+
@@ -232,15 +250,22 @@ PlayResY: ${videoHeight}
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,${fontName},${Math.round(config.fontSize * 1.5)},&H00FFFFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,${config.strokeWidth || 4},0,2,20,20,${Math.round(videoHeight * 0.15)},1
+Style: Default,${fontName},${Math.round(config.fontSize * 1.5)},${primaryColor},${secondaryColor},${outlineColor},&H80000000,-1,0,0,0,100,100,0,${config.rotation || 0},1,${config.strokeWidth ?? 4},0,2,20,20,${marginV},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 `;
 
   const dialogues = segments.map(seg => {
-    const textWithEmoji = seg.emoji ? `${seg.emoji} ${seg.text}` : seg.text;
-    return `Dialogue: 0,${formatASSTime(seg.start)},${formatASSTime(seg.end)},Default,,0,0,0,,${textWithEmoji}`;
+    const emojiPrefix = config.enableEmojis && seg.emoji ? `${seg.emoji} ` : '';
+    if (seg.words && seg.words.length > 0) {
+      const karaokeWords = seg.words.map(w => {
+        const durationCs = Math.max(5, Math.round((w.end - w.start) * 100));
+        return `{\\k${durationCs}}${w.word}`;
+      }).join(' ');
+      return `Dialogue: 0,${formatASSTime(seg.start)},${formatASSTime(seg.end)},Default,,0,0,0,,${emojiPrefix}${karaokeWords}`;
+    }
+    return `Dialogue: 0,${formatASSTime(seg.start)},${formatASSTime(seg.end)},Default,,0,0,0,,${emojiPrefix}${seg.text}`;
   }).join('\n');
 
   return header + dialogues;

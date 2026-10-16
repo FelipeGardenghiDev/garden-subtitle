@@ -114,12 +114,16 @@ Pegando fogo no estúdio`;
     expect(parsed[0].emoji).toBe('🔥');
   });
 
-  it('exports valid Advanced SubStation Alpha (.ass) format', () => {
+  it('exports valid Advanced SubStation Alpha (.ass) format with word-level {\\k} tags and BGR colors', async () => {
+    const { hexToASSColor } = await import('../src/core/exporters');
+    expect(hexToASSColor('#fde047')).toBe('&H0047E0FD');
+
     const ass = exportToASS(mockSegments, KINETIC_PRESETS['ali-abdaal']);
     expect(ass).toContain('[Script Info]');
     expect(ass).toContain('[V4+ Styles]');
     expect(ass).toContain('Plus Jakarta Sans');
     expect(ass).toContain('Dialogue: 0,0:00:01.00,0:00:02.50');
+    expect(ass).toContain('{\\k50}Muito {\\k50}dinheiro');
   });
 
   it('provides new kinetic presets Ali Abdaal and Karaoke Wave', () => {
@@ -183,6 +187,67 @@ Pegando fogo no estúdio`;
     history.push('step-3');
     expect(history.canRedo).toBe(false);
     expect(history.state).toBe('step-3');
+  });
+
+  it('paginates long segments across multiple word pages based on currentTime and maxWordsPerLine', async () => {
+    const { getActiveWordPage } = await import('../src/core/canvas-renderer');
+    const longWords = [
+      { id: 'w1', word: 'Um', start: 0.0, end: 0.5 },
+      { id: 'w2', word: 'dois', start: 0.5, end: 1.0 },
+      { id: 'w3', word: 'três', start: 1.0, end: 1.5 },
+      { id: 'w4', word: 'quatro', start: 1.5, end: 2.0 },
+      { id: 'w5', word: 'cinco', start: 2.0, end: 2.5 },
+      { id: 'w6', word: 'seis', start: 2.5, end: 3.0 },
+      { id: 'w7', word: 'sete', start: 3.0, end: 3.5 }
+    ];
+
+    const page1 = getActiveWordPage(longWords, 0.7, 3);
+    expect(page1.map(w => w.word)).toEqual(['Um', 'dois', 'três']);
+
+    const page2 = getActiveWordPage(longWords, 2.1, 3);
+    expect(page2.map(w => w.word)).toEqual(['quatro', 'cinco', 'seis']);
+
+    const page3 = getActiveWordPage(longWords, 3.2, 3);
+    expect(page3.map(w => w.word)).toEqual(['sete']);
+  });
+
+  it('computes normalized waveform peaks and synthetic speech waveforms accurately', async () => {
+    const { computeWaveformPeaks, generateSyntheticWaveform } = await import('../src/core/audio-waveform');
+
+    const pcm = new Float32Array(1600);
+    for (let i = 0; i < pcm.length; i++) {
+      pcm[i] = i < 800 ? 0.8 * Math.sin(i * 0.1) : 0.02;
+    }
+
+    const peaks = computeWaveformPeaks(pcm, 10);
+    expect(peaks).toHaveLength(10);
+    expect(peaks[0]).toBeGreaterThan(peaks[9]);
+    expect(Math.max(...peaks)).toBeLessThanOrEqual(1.0);
+    expect(Math.min(...peaks)).toBeGreaterThanOrEqual(0.06);
+
+    const synthetic = generateSyntheticWaveform(mockSegments, 5.0, 20);
+    expect(synthetic).toHaveLength(20);
+    // Bucket at t=1.25s (index 5) is inside seg-1 and should be higher than silence at t=0.1s (index 0)
+    expect(synthetic[5]).toBeGreaterThan(synthetic[0]);
+  });
+
+  it('converts Whisper word-level chunks into timed SubtitleSegments with pause and punctuation detection', async () => {
+    const { convertWhisperChunksToSegments } = await import('../src/core/speech-transcriber');
+    const chunks = [
+      { text: 'Ganhar', timestamp: [0.0, 0.4] as [number, number] },
+      { text: 'muito', timestamp: [0.4, 0.8] as [number, number] },
+      { text: 'dinheiro!', timestamp: [0.8, 1.3] as [number, number] },
+      { text: 'Nova', timestamp: [2.2, 2.5] as [number, number] },
+      { text: 'ideia', timestamp: [2.5, 3.0] as [number, number] }
+    ];
+
+    const segs = convertWhisperChunksToSegments(chunks, 4);
+    expect(segs).toHaveLength(2);
+    expect(segs[0].text).toBe('Ganhar muito dinheiro!');
+    expect(segs[0].emoji).toBe('💰');
+    expect(segs[0].words).toHaveLength(3);
+    expect(segs[1].text).toBe('Nova ideia');
+    expect(segs[1].emoji).toBe('💡');
   });
 });
 

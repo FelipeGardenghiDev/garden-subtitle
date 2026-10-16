@@ -7,7 +7,7 @@ import { KINETIC_PRESETS } from './core/kinetic-styles';
 import { DEMO_SUBTITLE_SEGMENTS, generateSegmentsFromText } from './core/demo-data';
 import { isNonNativeFormat, transcodeOrRemuxVideo, convertWebMToMP4 } from './core/ffmpeg-transcoder';
 import { parseSubtitleFile } from './core/subtitle-parsers';
-import { isSpeechRecognitionSupported, transcribeMediaElement } from './core/speech-transcriber';
+import { isSpeechRecognitionSupported, transcribeMediaElement, transcribeWithWhisperWasm } from './core/speech-transcriber';
 import { exportToFCPXML, exportToPremiereProject, exportToAfterEffectsScript } from './core/nle-exporters';
 import { 
   exportToSRT, 
@@ -57,6 +57,9 @@ export function App() {
     addSegment,
     updateSegmentText,
     updateSegmentTiming,
+    updateWord,
+    splitSegment,
+    mergeWithNextSegment,
     removeSegment,
     setSegmentEmoji,
     autoDetectEmojis,
@@ -249,6 +252,41 @@ export function App() {
     }
   };
 
+  // Transcrição Acústica via Whisper WebAssembly (16kHz Offline)
+  const handleTranscribeWithWhisperWasm = async () => {
+    if (!videoSrc) {
+      alert('Carregue um arquivo de vídeo ou áudio primeiro para transcrever com Whisper Wasm.');
+      return;
+    }
+
+    try {
+      setIsTranscribingAudio(true);
+      setLiveTranscriptionText('Iniciando extração PCM 16kHz...');
+      showToast('🧠 Processando áudio com Whisper WebAssembly (16kHz)...');
+
+      const generated = await transcribeWithWhisperWasm(
+        videoSrc,
+        (text) => setLiveTranscriptionText(text),
+        kineticConfig.maxWordsPerLine || 4
+      );
+
+      if (generated.length > 0) {
+        setSegments(generated, true);
+        confetti({ particleCount: 80, spread: 70, origin: { y: 0.6 } });
+        showToast(`🎉 Whisper Wasm gerou ${generated.length} segmentos com Word-Level Timestamps!`);
+        setActiveTab('editor');
+      } else {
+        showToast('Nenhuma fala detectada pelo Whisper Wasm.');
+      }
+    } catch (err: any) {
+      console.error(err);
+      alert('Erro ao transcrever com Whisper Wasm: ' + (err.message || err));
+    } finally {
+      setIsTranscribingAudio(false);
+      setLiveTranscriptionText('');
+    }
+  };
+
   // Conversão de Texto para Legendas
   const handleConvertText = (e: React.FormEvent) => {
     e.preventDefault();
@@ -315,9 +353,13 @@ export function App() {
     }
   };
 
+  const getExportDimensions = () => ({
+    w: aspectRatio === '16:9' ? 1920 : 1080,
+    h: aspectRatio === '9:16' ? 1920 : 1080
+  });
+
   const handleExportTransparentOverlay = async () => {
-    const w = aspectRatio === '9:16' ? 1080 : 1920;
-    const h = aspectRatio === '9:16' ? 1920 : 1080;
+    const { w, h } = getExportDimensions();
 
     setIsExporting(true);
     setExportProgress(0);
@@ -387,8 +429,7 @@ export function App() {
   };
 
   const handleExportASS = () => {
-    const w = aspectRatio === '9:16' ? 1080 : 1920;
-    const h = aspectRatio === '9:16' ? 1920 : 1080;
+    const { w, h } = getExportDimensions();
     const assContent = exportToASS(segments, kineticConfig, w, h);
     const blob = new Blob([assContent], { type: 'text/plain;charset=utf-8' });
     const url = URL.createObjectURL(blob);
@@ -402,8 +443,7 @@ export function App() {
 
   const handleExportPremiere = async () => {
     try {
-      const w = aspectRatio === '9:16' ? 1080 : 1920;
-      const h = aspectRatio === '9:16' ? 1920 : 1080;
+      const { w, h } = getExportDimensions();
       const blob = await exportToPremiereProject(segments, kineticConfig, videoName, duration, w, h, 30);
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -421,8 +461,7 @@ export function App() {
 
   const handleExportFCPXML = () => {
     try {
-      const w = aspectRatio === '9:16' ? 1080 : 1920;
-      const h = aspectRatio === '9:16' ? 1920 : 1080;
+      const { w, h } = getExportDimensions();
       const xmlContent = exportToFCPXML(segments, kineticConfig, videoName, duration, w, h, 30);
       const blob = new Blob([xmlContent], { type: 'application/xml;charset=utf-8' });
       const url = URL.createObjectURL(blob);
@@ -441,8 +480,7 @@ export function App() {
 
   const handleExportAfterEffects = () => {
     try {
-      const w = aspectRatio === '9:16' ? 1080 : 1920;
-      const h = aspectRatio === '9:16' ? 1920 : 1080;
+      const { w, h } = getExportDimensions();
       const scriptContent = exportToAfterEffectsScript(segments, kineticConfig, videoName, duration, w, h, 30);
       const blob = new Blob([scriptContent], { type: 'text/javascript;charset=utf-8' });
       const url = URL.createObjectURL(blob);
@@ -512,6 +550,7 @@ export function App() {
           previewCanvasRef={previewCanvasRef}
           videoSrc={videoSrc}
           videoName={videoName}
+          segments={segments}
           isPlaying={isPlaying}
           currentTime={currentTime}
           duration={duration}
@@ -521,11 +560,16 @@ export function App() {
           seek={seek}
           toggleMute={toggleMute}
           setAspectRatio={setAspectRatio}
+          onUpdateSegmentTiming={updateSegmentTiming}
           onVideoLoadedMetadata={(e) => {
             const vid = e.currentTarget;
             setDuration(vid.duration || 10);
             if (vid.videoWidth && vid.videoHeight) {
-              setAspectRatio(vid.videoWidth < vid.videoHeight ? '9:16' : '16:9');
+              if (Math.abs(vid.videoWidth - vid.videoHeight) <= 20) {
+                setAspectRatio('1:1');
+              } else {
+                setAspectRatio(vid.videoWidth < vid.videoHeight ? '9:16' : '16:9');
+              }
             }
           }}
           onVideoTimeUpdate={() => {
@@ -589,11 +633,15 @@ export function App() {
                 onAddSegment={() => addSegment(currentTime, currentTime + 2.5)}
                 onOpenTextModal={() => setIsTextModalOpen(true)}
                 onTranscribeAI={handleTranscribeWithAI}
+                onTranscribeWhisperWasm={handleTranscribeWithWhisperWasm}
                 isTranscribingAudio={isTranscribingAudio}
                 liveTranscriptionText={liveTranscriptionText}
                 onAutoEmojis={autoDetectEmojis}
                 onUpdateSegmentText={updateSegmentText}
                 onUpdateSegmentTiming={updateSegmentTiming}
+                onUpdateWord={updateWord}
+                onSplitSegment={splitSegment}
+                onMergeWithNextSegment={mergeWithNextSegment}
                 onRemoveSegment={removeSegment}
                 onSelectEmoji={setSegmentEmoji}
                 editingEmojiSegmentId={editingEmojiSegmentId}

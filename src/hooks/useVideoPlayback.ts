@@ -6,17 +6,31 @@ export function useVideoPlayback(
   segments: SubtitleSegment[],
   kineticConfig: KineticConfig
 ) {
-  const [videoSrc, setVideoSrc] = useState<string | null>(null);
+  const [videoSrc, setVideoSrcState] = useState<string | null>(null);
   const [videoName, setVideoName] = useState<string>('video-demo.mp4');
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [currentTime, setCurrentTime] = useState<number>(0);
   const [duration, setDuration] = useState<number>(11.5);
   const [isMuted, setIsMuted] = useState<boolean>(false);
-  const [aspectRatio, setAspectRatio] = useState<'9:16' | '16:9'>('9:16');
+  const [aspectRatio, setAspectRatio] = useState<'9:16' | '16:9' | '1:1'>('9:16');
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const previewCanvasRef = useRef<HTMLCanvasElement>(null);
   const animFrameRef = useRef<number | null>(null);
+
+  // Atualiza videoSrc revogando URLs blob anteriores para evitar vazamento de memória RAM
+  const setVideoSrc = useCallback((newSrc: string | null) => {
+    setVideoSrcState(prev => {
+      if (prev && prev !== newSrc && prev.startsWith('blob:')) {
+        try {
+          URL.revokeObjectURL(prev);
+        } catch {
+          // Ignora caso já tenha sido revogado
+        }
+      }
+      return newSrc;
+    });
+  }, []);
 
   // Alterna Play / Pause
   const togglePlay = useCallback(() => {
@@ -50,6 +64,36 @@ export function useVideoPlayback(
     }
     setIsMuted(prev => !prev);
   }, [isMuted]);
+
+  // Atalhos de Teclado do Player: Espaço (Play/Pause) e Setas Esquerda/Direita (-0.5s / +0.5s)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement;
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.tagName === 'BUTTON')
+      ) {
+        return;
+      }
+
+      if (e.code === 'Space') {
+        e.preventDefault();
+        togglePlay();
+      } else if (e.code === 'ArrowLeft') {
+        e.preventDefault();
+        seek(currentTime - 0.5);
+      } else if (e.code === 'ArrowRight') {
+        e.preventDefault();
+        seek(currentTime + 0.5);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [togglePlay, seek, currentTime]);
 
   // Loop de renderização no Canvas Preview
   const renderFrame = useCallback(() => {
