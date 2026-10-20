@@ -14,7 +14,9 @@ import {
   exportToVTT, 
   exportToGardenCut, 
   exportVideoWithBurnIn, 
-  exportToASS, 
+  exportToASS,
+  exportToTTML,
+  exportToEDL, 
   exportTransparentOverlay 
 } from './core/exporters';
 
@@ -456,6 +458,39 @@ export function App() {
     } catch (err: any) {
       console.error(err);
       alert('Erro ao gerar projeto Premiere: ' + (err.message || err));
+    }
+  };
+
+
+  const handleExportTTML = () => {
+    try {
+      const ttml = exportToTTML(segments, kineticConfig, videoName);
+      const blob = new Blob([ttml], { type: 'application/ttml+xml;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${videoName.replace(/\.[^/.]+$/, '')}_w3c.ttml`;
+      a.click();
+      URL.revokeObjectURL(url);
+      showToast('🌐 Arquivo .TTML (Padrão W3C/Netflix) baixado com sucesso!');
+    } catch (err: any) {
+      alert('Erro ao gerar TTML: ' + err.message);
+    }
+  };
+
+  const handleExportEDL = () => {
+    try {
+      const edl = exportToEDL(segments, videoName, 30);
+      const blob = new Blob([edl], { type: 'text/plain;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${videoName.replace(/\.[^/.]+$/, '')}_cut.edl`;
+      a.click();
+      URL.revokeObjectURL(url);
+      showToast('📋 Arquivo .EDL (CMX 3600 NLE) baixado com sucesso!');
+    } catch (err: any) {
+      alert('Erro ao gerar EDL: ' + err.message);
     }
   };
 

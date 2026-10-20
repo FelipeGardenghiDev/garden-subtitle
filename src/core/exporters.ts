@@ -356,3 +356,105 @@ export function exportTransparentOverlay(
     }
   });
 }
+
+
+/**
+ * Converte segundos para o formato de tempo TTML/SMPTE (00:00:01.234)
+ */
+function formatTTMLTime(seconds: number): string {
+  return formatVTTTime(seconds);
+}
+
+/**
+ * 4. Exporta para especificação W3C TTML (Timed Text Markup Language)
+ * Padrão oficial Netflix, Amazon Prime Video e SMPTE-TT.
+ */
+export function exportToTTML(
+  segments: SubtitleSegment[],
+  config: KineticConfig,
+  videoName = 'garden_subtitle'
+): string {
+  const safeTitle = (videoName.replace(/\.[^/.]+$/, '') || 'garden_subtitle').replace(/[<>&]/g, '');
+  const font = config.style === 'mrbeast' ? 'Titan One' : config.style === 'ali-abdaal' ? 'Plus Jakarta Sans' : 'Montserrat';
+  const color = config.highlightColor || '#FFE81F';
+
+  const bodyElements = segments.map((seg, idx) => {
+    const text = (seg.emoji ? `${seg.emoji} ${seg.text}` : seg.text)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+    return `      <p xml:id="sub_${idx + 1}" begin="${formatTTMLTime(seg.start)}" end="${formatTTMLTime(seg.end)}" region="bottomRegion" style="style_kinetic">${text}</p>`;
+  }).join('\n');
+
+  return `<?xml version="1.0" encoding="utf-8"?>
+<tt xmlns="http://www.w3.org/ns/ttml"
+    xmlns:ttp="http://www.w3.org/ns/ttml#parameter"
+    xmlns:tts="http://www.w3.org/ns/ttml#styling"
+    ttp:timeBase="media"
+    xml:lang="pt-BR">
+  <head>
+    <metadata>
+      <title>${safeTitle} - Garden Subtitle TTML</title>
+    </metadata>
+    <styling>
+      <style xml:id="style_kinetic"
+             tts:fontFamily="${font}, sans-serif"
+             tts:fontSize="${Math.round(config.fontSize)}px"
+             tts:color="${color}"
+             tts:textAlign="center"
+             tts:fontWeight="bold" />
+    </styling>
+    <layout>
+      <region xml:id="bottomRegion"
+              tts:origin="10% ${config.positionY || 75}%"
+              tts:extent="80% 20%"
+              tts:displayAlign="after" />
+    </layout>
+  </head>
+  <body>
+    <div>
+${bodyElements}
+    </div>
+  </body>
+</tt>`;
+}
+
+/**
+ * Converte segundos para timecode SMPTE no padrão EDL (HH:MM:SS:FF)
+ */
+export function formatEDLTimecode(seconds: number, fps = 30): string {
+  const pad = (n: number, s = 2) => String(Math.floor(n)).padStart(s, '0');
+  const safeSeconds = Math.max(0, seconds);
+  const hrs = Math.floor(safeSeconds / 3600);
+  const mins = Math.floor((safeSeconds % 3600) / 60);
+  const secs = Math.floor(safeSeconds % 60);
+  const frames = Math.min(fps - 1, Math.floor((safeSeconds % 1) * fps));
+  return `${pad(hrs)}:${pad(mins)}:${pad(secs)}:${pad(frames)}`;
+}
+
+/**
+ * 5. Exporta para formato CMX 3600 EDL (Edit Decision List)
+ * Padrão universal para interoperabilidade de cortes e legendas no DaVinci Resolve, Avid e Premiere.
+ */
+export function exportToEDL(
+  segments: SubtitleSegment[],
+  videoName = 'garden_subtitle',
+  fps = 30
+): string {
+  const safeTitle = (videoName.replace(/\.[^/.]+$/, '').toUpperCase() || 'GARDEN_SUBTITLE')
+    .replace(/[^A-Z0-9_]/g, '_')
+    .slice(0, 32);
+
+  const header = `TITLE: ${safeTitle}\nFCM: NON-DROP FRAME\n\n`;
+
+  const eventLines = segments.map((seg, idx) => {
+    const eventNum = String(idx + 1).padStart(3, '0');
+    const inTc = formatEDLTimecode(seg.start, fps);
+    const outTc = formatEDLTimecode(seg.end, fps);
+    const textSnippet = (seg.emoji ? `${seg.emoji} ${seg.text}` : seg.text).replace(/\r?\n/g, ' ');
+
+    return `${eventNum}  AX       V     C        ${inTc} ${outTc} ${inTc} ${outTc}\n* FROM CLIP NAME: SUB_${eventNum}\n* COMMENT: ${textSnippet}\n`;
+  }).join('\n');
+
+  return header + eventLines;
+}

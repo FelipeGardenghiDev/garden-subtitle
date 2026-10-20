@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { detectContextEmoji, autoAssignEmojis } from '../src/core/emoji-detector';
-import { exportToSRT, exportToVTT, exportToGardenCut, exportToASS } from '../src/core/exporters';
+import { exportToSRT, exportToVTT, exportToGardenCut, exportToASS, exportToTTML, exportToEDL } from '../src/core/exporters';
 import { KINETIC_PRESETS } from '../src/core/kinetic-styles';
 import { SubtitleSegment } from '../src/types';
 import { isNonNativeFormat } from '../src/core/ffmpeg-transcoder';
@@ -249,5 +249,34 @@ Pegando fogo no estúdio`;
     expect(segs[1].text).toBe('Nova ideia');
     expect(segs[1].emoji).toBe('💡');
   });
-});
+  it('exports valid W3C TTML specification format with kinetic styles', () => {
+    const ttml = exportToTTML(mockSegments, KINETIC_PRESETS.hormozi, 'meu_video.mp4');
+    expect(ttml).toContain('xmlns="http://www.w3.org/ns/ttml"');
+    expect(ttml).toContain('xml:id="sub_1"');
+    expect(ttml).toContain('begin="00:00:01.000"');
+    expect(ttml).toContain('Muito dinheiro e vendas');
+    expect(ttml).toContain('tts:fontFamily="Montserrat, sans-serif"');
+  });
 
+  it('exports valid CMX 3600 EDL format for Premiere / DaVinci Resolve', () => {
+    const edl = exportToEDL(mockSegments, 'meu_video.mp4', 30);
+    expect(edl).toContain('TITLE: MEU_VIDEO');
+    expect(edl).toContain('FCM: NON-DROP FRAME');
+    expect(edl).toContain('001  AX       V     C');
+    expect(edl).toContain('00:00:01:00 00:00:02:15');
+    expect(edl).toContain('* COMMENT: Muito dinheiro e vendas');
+  });
+
+  it('quantizes timestamps to frame boundaries and performs magnetic snap', async () => {
+    const { quantizeToFrame, findNearestSnapPoint, shouldSnapToPoint } = await import('../src/core/audio-scrubber');
+    // At 30fps, 1 frame is ~0.0333s
+    expect(quantizeToFrame(1.016, 30)).toBe(1.0);
+    expect(quantizeToFrame(1.034, 30)).toBe(1.0333);
+
+    // Magnetic snap
+    const markers = [1.0, 2.5, 4.0];
+    expect(findNearestSnapPoint(1.02, markers, 0.05)).toBe(1.0);
+    expect(findNearestSnapPoint(1.5, markers, 0.05)).toBeNull();
+    expect(shouldSnapToPoint(2.52, 2.5, 0.05)).toBe(true);
+  });
+});

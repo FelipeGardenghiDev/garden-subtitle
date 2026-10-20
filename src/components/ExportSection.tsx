@@ -16,6 +16,8 @@ interface ExportSectionProps {
   onExportPremiere: () => void;
   onExportFCPXML: () => void;
   onExportAfterEffects: () => void;
+  onExportTTML?: () => void;
+  onExportEDL?: () => void;
   onOpenOBSLive: () => void;
 }
 
@@ -31,6 +33,8 @@ export const ExportSection: React.FC<ExportSectionProps> = ({
   onExportPremiere,
   onExportFCPXML,
   onExportAfterEffects,
+  onExportTTML,
+  onExportEDL,
   onOpenOBSLive
 }) => {
   return (
@@ -179,7 +183,7 @@ export const ExportSection: React.FC<ExportSectionProps> = ({
           </div>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2.5 pt-1">
           {/* Adobe Premiere Pro .prproj */}
           <button
             onClick={onExportPremiere}
@@ -234,6 +238,43 @@ export const ExportSection: React.FC<ExportSectionProps> = ({
             </div>
             <span className="text-[10px] font-mono text-amber-300 mt-3 flex items-center gap-1 font-bold group-hover:translate-x-0.5 transition-transform">
               Baixar .jsx <ArrowRight className="w-3 h-3" />
+            </span>
+          </button>
+          {/* W3C TTML / Netflix */}
+          <button
+            onClick={onExportTTML}
+            className="p-3.5 rounded-xl bg-slate-900 border border-slate-800 hover:border-emerald-500/50 text-left transition cursor-pointer flex flex-col justify-between group"
+          >
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-xs font-bold text-emerald-400">🌐 W3C TTML / SMPTE</span>
+                <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-mono font-bold">.ttml</span>
+              </div>
+              <p className="text-[10px] text-slate-400 leading-tight">
+                Padrão internacional Netflix e Amazon Prime com posicionamento e estilização W3C.
+              </p>
+            </div>
+            <span className="text-[10px] font-mono text-emerald-300 mt-3 flex items-center gap-1 font-bold group-hover:translate-x-0.5 transition-transform">
+              Baixar .ttml <ArrowRight className="w-3 h-3" />
+            </span>
+          </button>
+
+          {/* CMX 3600 EDL */}
+          <button
+            onClick={onExportEDL}
+            className="p-3.5 rounded-xl bg-slate-900 border border-slate-800 hover:border-cyan-500/50 text-left transition cursor-pointer flex flex-col justify-between group"
+          >
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-xs font-bold text-cyan-400">📋 CMX 3600 EDL</span>
+                <span className="text-[9px] px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-300 font-mono font-bold">.edl</span>
+              </div>
+              <p className="text-[10px] text-slate-400 leading-tight">
+                Lista de decisão de corte universal com timecodes SMPTE para Avid, DaVinci e Premiere.
+              </p>
+            </div>
+            <span className="text-[10px] font-mono text-cyan-300 mt-3 flex items-center gap-1 font-bold group-hover:translate-x-0.5 transition-transform">
+              Baixar .edl <ArrowRight className="w-3 h-3" />
             </span>
           </button>
         </div>
