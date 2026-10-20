@@ -1,0 +1,6 @@
+{
+  "appId": "com.gardenghi.gardensubtitle",
+  "appName": "Garden Subtitle",
+  "webDir": "dist",
+  "bundledWebRuntime": false
+}

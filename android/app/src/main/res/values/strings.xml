@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Garden Subtitle</string>
+    <string name="title_activity_main">Garden Subtitle</string>
+    <string name="package_name">com.gardenghi.gardensubtitle</string>
+    <string name="custom_url_scheme">com.gardenghi.gardensubtitle</string>
+</resources>
