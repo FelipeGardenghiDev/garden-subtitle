@@ -3,7 +3,7 @@ import {
   Sparkles, FileText, Plus, Trash2, Mic, Smile,
   Undo2, Redo2, Clock, Scissors, Merge, ChevronDown, ChevronUp, Cpu
 } from 'lucide-react';
-import { SubtitleSegment, WordTimestamp } from '../types';
+import { SubtitleSegment, WordTimestamp, WhisperModelSize, WhisperLanguage } from '../types';
 
 interface SubtitleEditorProps {
   segments: SubtitleSegment[];
@@ -17,6 +17,10 @@ interface SubtitleEditorProps {
   onOpenTextModal: () => void;
   onTranscribeAI: () => void;
   onTranscribeWhisperWasm: () => void;
+  whisperModel?: WhisperModelSize;
+  setWhisperModel?: (model: WhisperModelSize) => void;
+  whisperLanguage?: WhisperLanguage;
+  setWhisperLanguage?: (lang: WhisperLanguage) => void;
   isTranscribingAudio: boolean;
   liveTranscriptionText: string;
   onAutoEmojis: () => void;
@@ -45,6 +49,10 @@ export const SubtitleEditor: React.FC<SubtitleEditorProps> = ({
   onOpenTextModal,
   onTranscribeAI,
   onTranscribeWhisperWasm,
+  whisperModel = 'tiny',
+  setWhisperModel,
+  whisperLanguage = 'portuguese',
+  setWhisperLanguage,
   isTranscribingAudio,
   liveTranscriptionText,
   onAutoEmojis,
@@ -126,26 +134,59 @@ export const SubtitleEditor: React.FC<SubtitleEditorProps> = ({
         </div>
 
         {/* Motores de Transcrição Acústica (Whisper Wasm 16kHz Offline vs Web Speech API) */}
-        <div className="grid grid-cols-2 gap-1.5 pt-1 border-t border-slate-900">
-          <button
-            onClick={onTranscribeWhisperWasm}
-            disabled={isTranscribingAudio}
-            className="flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-cyan-500/10 border border-cyan-500/30 text-cyan-300 hover:bg-cyan-500/20 text-[11px] font-bold transition cursor-pointer disabled:opacity-50"
-            title="Extrair áudio em 16kHz via Web Audio API e transcrever com Whisper WebAssembly (Word-Level Timestamps)"
-          >
-            <Cpu className="w-3.5 h-3.5 text-cyan-400" />
-            <span>{isTranscribingAudio ? 'Processando...' : 'Whisper Wasm (16kHz)'}</span>
-          </button>
+        <div className="space-y-1.5 pt-1 border-t border-slate-900">
+          {setWhisperModel && setWhisperLanguage && (
+            <div className="grid grid-cols-2 gap-1.5 text-[10px]">
+              <div>
+                <label className="text-slate-400 block mb-0.5 font-medium">Modelo Whisper:</label>
+                <select
+                  value={whisperModel}
+                  onChange={(e) => setWhisperModel(e.target.value as WhisperModelSize)}
+                  disabled={isTranscribingAudio}
+                  className="w-full bg-slate-900 border border-slate-800 rounded px-1.5 py-1 text-slate-200 text-xs"
+                >
+                  <option value="tiny">Tiny (~39MB)</option>
+                  <option value="base">Base (~74MB)</option>
+                  <option value="small">Small (~244MB)</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-slate-400 block mb-0.5 font-medium">Idioma:</label>
+                <select
+                  value={whisperLanguage}
+                  onChange={(e) => setWhisperLanguage(e.target.value as WhisperLanguage)}
+                  disabled={isTranscribingAudio}
+                  className="w-full bg-slate-900 border border-slate-800 rounded px-1.5 py-1 text-slate-200 text-xs"
+                >
+                  <option value="portuguese">Português</option>
+                  <option value="english">Inglês</option>
+                  <option value="spanish">Espanhol</option>
+                  <option value="auto">Automático</option>
+                </select>
+              </div>
+            </div>
+          )}
+          <div className="grid grid-cols-2 gap-1.5">
+            <button
+              onClick={onTranscribeWhisperWasm}
+              disabled={isTranscribingAudio}
+              className="flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-cyan-500/10 border border-cyan-500/30 text-cyan-300 hover:bg-cyan-500/20 text-[11px] font-bold transition cursor-pointer disabled:opacity-50"
+              title="Extrair áudio em 16kHz via Web Audio API e transcrever com Whisper WebAssembly (Word-Level Timestamps)"
+            >
+              <Cpu className="w-3.5 h-3.5 text-cyan-400" />
+              <span>{isTranscribingAudio ? 'Processando...' : `Whisper (${whisperModel})`}</span>
+            </button>
 
-          <button
-            onClick={onTranscribeAI}
-            disabled={isTranscribingAudio}
-            className="flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20 text-[11px] font-bold transition cursor-pointer disabled:opacity-50"
-            title="Transcrever áudio do vídeo em tempo real usando reconhecimento nativo do navegador"
-          >
-            <Mic className="w-3.5 h-3.5" />
-            <span>{isTranscribingAudio ? 'Ouvindo...' : 'Web Speech (Live)'}</span>
-          </button>
+            <button
+              onClick={onTranscribeAI}
+              disabled={isTranscribingAudio}
+              className="flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20 text-[11px] font-bold transition cursor-pointer disabled:opacity-50"
+              title="Transcrever áudio do vídeo em tempo real usando reconhecimento nativo do navegador"
+            >
+              <Mic className="w-3.5 h-3.5" />
+              <span>{isTranscribingAudio ? 'Ouvindo...' : 'Web Speech (Live)'}</span>
+            </button>
+          </div>
         </div>
       </div>
 

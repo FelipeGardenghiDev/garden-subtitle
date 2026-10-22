@@ -1,4 +1,4 @@
-import { SubtitleSegment, WordTimestamp } from '../types';
+import { SubtitleSegment, WordTimestamp, WhisperModelSize, WhisperLanguage, WhisperTranscriptionOptions } from '../types';
 import { createWordTimestamps } from './subtitle-parsers';
 import { detectContextEmoji } from './emoji-detector';
 import { extractMonoAudio16kHz } from './audio-waveform';
@@ -16,8 +16,23 @@ export interface WhisperWordChunk {
   timestamp: [number, number | null];
 }
 
-// Cache singleton do pipeline Whisper Wasm para evitar recarregamento
-let whisperPipelinePromise: Promise<any> | null = null;
+export const WHISPER_MODEL_HUB_MAP: Record<WhisperModelSize, string> = {
+  tiny: 'Xenova/whisper-tiny',
+  base: 'Xenova/whisper-base',
+  small: 'Xenova/whisper-small',
+};
+
+export function getWhisperModelIdentifier(model: WhisperModelSize): string {
+  return WHISPER_MODEL_HUB_MAP[model] || WHISPER_MODEL_HUB_MAP.tiny;
+}
+
+export function getWhisperLanguageParam(lang: WhisperLanguage): string | undefined {
+  if (lang === 'auto') return undefined;
+  return lang;
+}
+
+// Cache singleton dos pipelines Whisper Wasm para evitar recarregamento
+const whisperPipelines: Partial<Record<WhisperModelSize, Promise<any>>> = {};
 
 /**
  * Verifica se a API de Reconhecimento de Voz nativa do navegador está disponível
@@ -104,31 +119,42 @@ export function convertWhisperChunksToSegments(
 export async function transcribeWithWhisperWasm(
   mediaSrc: string,
   onProgressText: (text: string) => void,
-  maxWordsPerSegment = 4
+  options?: WhisperTranscriptionOptions | number
 ): Promise<SubtitleSegment[]> {
+  const opts: WhisperTranscriptionOptions = typeof options === 'number'
+    ? { maxWordsPerSegment: options }
+    : (options || {});
+
+  const model: WhisperModelSize = opts.model || 'tiny';
+  const language: WhisperLanguage = opts.language || 'portuguese';
+  const maxWordsPerSegment = opts.maxWordsPerSegment || 4;
+
   onProgressText('Extraindo áudio PCM 16kHz via Web Audio API...');
   const audioData = await extractMonoAudio16kHz(mediaSrc);
 
-  onProgressText('Carregando motor Whisper WebAssembly (ONNX Runtime Web)...');
-  if (!whisperPipelinePromise) {
+  const modelId = getWhisperModelIdentifier(model);
+  onProgressText(`Carregando motor Whisper WebAssembly (${model} / ONNX Runtime Web)...`);
+
+  if (!whisperPipelines[model]) {
     const transformersUrl = 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.4.0';
     const { pipeline, env } = await import(/* @vite-ignore */ transformersUrl);
     env.allowLocalModels = false;
-    whisperPipelinePromise = pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny', {
+    whisperPipelines[model] = pipeline('automatic-speech-recognition', modelId, {
       dtype: 'q8',
       progress_callback: (info: any) => {
         if (info.status === 'progress' && typeof info.progress === 'number') {
-          onProgressText(`Baixando modelo Whisper Wasm: ${Math.round(info.progress)}%`);
+          onProgressText(`Baixando modelo Whisper ${model} Wasm: ${Math.round(info.progress)}%`);
         }
       }
     });
   }
 
-  const transcriber = await whisperPipelinePromise;
-  onProgressText('Executando inferência acústica Whisper (Word-Level Timestamps)...');
+  const transcriber = await whisperPipelines[model];
+  onProgressText(`Executando inferência acústica Whisper ${model} (${language})...`);
 
+  const langParam = getWhisperLanguageParam(language);
   const result = await transcriber(audioData, {
-    language: 'portuguese',
+    language: langParam,
     task: 'transcribe',
     return_timestamps: 'word',
     chunk_length_s: 30,

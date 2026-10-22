@@ -72,3 +72,12 @@ export interface GardenCutProjectImport {
     clips: GardenCutTextClip[];
   }>;
 }
+
+export type WhisperModelSize = 'tiny' | 'base' | 'small';
+export type WhisperLanguage = 'portuguese' | 'english' | 'spanish' | 'auto';
+
+export interface WhisperTranscriptionOptions {
+  model?: WhisperModelSize;
+  language?: WhisperLanguage;
+  maxWordsPerSegment?: number;
+}

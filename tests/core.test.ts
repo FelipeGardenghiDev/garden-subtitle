@@ -279,4 +279,17 @@ Pegando fogo no estúdio`;
     expect(findNearestSnapPoint(1.5, markers, 0.05)).toBeNull();
     expect(shouldSnapToPoint(2.52, 2.5, 0.05)).toBe(true);
   });
+
+  it('correctly maps Whisper model sizes and language parameters', async () => {
+    const { getWhisperModelIdentifier, getWhisperLanguageParam, WHISPER_MODEL_HUB_MAP } = await import('../src/core/speech-transcriber');
+    expect(getWhisperModelIdentifier('tiny')).toBe('Xenova/whisper-tiny');
+    expect(getWhisperModelIdentifier('base')).toBe('Xenova/whisper-base');
+    expect(getWhisperModelIdentifier('small')).toBe('Xenova/whisper-small');
+    expect(WHISPER_MODEL_HUB_MAP['tiny']).toBe('Xenova/whisper-tiny');
+
+    expect(getWhisperLanguageParam('portuguese')).toBe('portuguese');
+    expect(getWhisperLanguageParam('english')).toBe('english');
+    expect(getWhisperLanguageParam('spanish')).toBe('spanish');
+    expect(getWhisperLanguageParam('auto')).toBeUndefined();
+  });
 });

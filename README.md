@@ -17,7 +17,7 @@ Criadores de conteúdo para **TikTok, Instagram Reels, YouTube Shorts e LinkedIn
 
 O **Garden Subtitle** executa **100% no navegador**:
 1. **Duplo Motor de Transcrição de Voz Local:**
-   * **Whisper WebAssembly (16kHz Offline):** Extração acústica PCM Mono 16kHz via `AudioContext` / `OfflineAudioContext` e inferência local via **ONNX Runtime Web (`@huggingface/transformers`)** com *Word-Level Timestamps* reais e detecção automática de pausas e pontuação.
+   * **Whisper WebAssembly (16kHz Offline):** Extração acústica PCM Mono 16kHz via `AudioContext` / `OfflineAudioContext` e inferência local via **ONNX Runtime Web (`@huggingface/transformers`)** com perfis de modelo selecionáveis (**Tiny** ~39MB, **Base** ~74MB, **Small** ~244MB), suporte multilíngue (Português, Inglês, Espanhol, Auto) e *Word-Level Timestamps* reais com detecção automática de pausas e pontuação.
    * **Web Speech API (Live):** Reconhecimento em tempo real para vídeos ou captação direta de microfone em transmissões ao vivo.
 2. **Timeline Interativa de Áudio (16kHz Waveform DSP) & Edição Cirúrgica:**
    * Visualização das ondas sonoras reais do vídeo com agulha de *playhead* e blocos de legenda redimensionáveis por arraste (*drag handles*).
@@ -104,6 +104,13 @@ flowchart TD
 * `←` / `→`: Retroceder / Avançar `0.5s` na timeline
 * `Ctrl + Z`: Desfazer alteração (*Undo*)
 * `Ctrl + Y` ou `Ctrl + Shift + Z`: Refazer alteração (*Redo*)
+
+---
+
+## 🚀 Deploy Web & Aplicativo Android (APK)
+
+* **Web App (GitHub Pages):** [felipegardenghidev.github.io/garden-subtitle](https://felipegardenghidev.github.io/garden-subtitle/)
+* **Download do APK Android:** A cada commit na branch principal, o GitHub Actions compila automaticamente o APK nativo através do pipeline Capacitor + Gradle e disponibiliza o artefato `garden-subtitle-debug-apk` para download direto na aba **Actions** do repositório, dispensando o Android Studio na máquina local.
 
 ---
 

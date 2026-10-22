@@ -2,7 +2,7 @@ import React, { useState, useRef } from 'react';
 import { Layers, Sliders, Type, Upload } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
-import { KineticConfig, KineticStyle } from './types';
+import { KineticConfig, KineticStyle, WhisperModelSize, WhisperLanguage } from './types';
 import { KINETIC_PRESETS } from './core/kinetic-styles';
 import { DEMO_SUBTITLE_SEGMENTS, generateSegmentsFromText } from './core/demo-data';
 import { isNonNativeFormat, transcodeOrRemuxVideo, convertWebMToMP4 } from './core/ffmpeg-transcoder';
@@ -120,6 +120,8 @@ export function App() {
 
   // Estados de Transcrição por Áudio e Emojis
   const [isTranscribingAudio, setIsTranscribingAudio] = useState<boolean>(false);
+  const [whisperModel, setWhisperModel] = useState<WhisperModelSize>('tiny');
+  const [whisperLanguage, setWhisperLanguage] = useState<WhisperLanguage>('portuguese');
   const [liveTranscriptionText, setLiveTranscriptionText] = useState<string>('');
   const [editingEmojiSegmentId, setEditingEmojiSegmentId] = useState<string | null>(null);
 
@@ -263,13 +265,17 @@ export function App() {
 
     try {
       setIsTranscribingAudio(true);
-      setLiveTranscriptionText('Iniciando extração PCM 16kHz...');
-      showToast('🧠 Processando áudio com Whisper WebAssembly (16kHz)...');
+      setLiveTranscriptionText(`Iniciando extração PCM 16kHz (${whisperModel})...`);
+      showToast(`🧠 Processando áudio com Whisper ${whisperModel} (${whisperLanguage})...`);
 
       const generated = await transcribeWithWhisperWasm(
         videoSrc,
         (text) => setLiveTranscriptionText(text),
-        kineticConfig.maxWordsPerLine || 4
+        {
+          model: whisperModel,
+          language: whisperLanguage,
+          maxWordsPerSegment: kineticConfig.maxWordsPerLine || 4
+        }
       );
 
       if (generated.length > 0) {
@@ -669,6 +675,10 @@ export function App() {
                 onOpenTextModal={() => setIsTextModalOpen(true)}
                 onTranscribeAI={handleTranscribeWithAI}
                 onTranscribeWhisperWasm={handleTranscribeWithWhisperWasm}
+                whisperModel={whisperModel}
+                setWhisperModel={setWhisperModel}
+                whisperLanguage={whisperLanguage}
+                setWhisperLanguage={setWhisperLanguage}
                 isTranscribingAudio={isTranscribingAudio}
                 liveTranscriptionText={liveTranscriptionText}
                 onAutoEmojis={autoDetectEmojis}
